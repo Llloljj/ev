@@ -1,0 +1,4 @@
+node_modules/
+evcharging.db
+.DS_Store
+*.log

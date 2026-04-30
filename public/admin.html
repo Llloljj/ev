@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoltFind – Admin Dashboard</title>
+  <meta name="description" content="VoltFind admin panel for monitoring EV charging station usage and bookings." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    body { background: #0A0F1E; }
+    .admin-layout { display: flex; min-height: 100vh; padding-top: var(--nav-h); }
+    .admin-sidebar {
+      width: 240px; background: var(--bg2); border-right: 1px solid var(--border);
+      padding: 24px 16px; position: fixed; top: var(--nav-h); bottom: 0; left: 0; overflow-y: auto;
+    }
+    .admin-main { margin-left: 240px; flex: 1; padding: 32px; }
+    .admin-nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; border-radius: 10px; font-size: .875rem; font-weight: 500;
+      color: var(--text2); cursor: pointer; transition: all .2s; margin-bottom: 4px;
+    }
+    .admin-nav-item:hover, .admin-nav-item.active {
+      background: rgba(59,130,246,.12); color: var(--primary);
+    }
+    .admin-nav-item svg { width: 18px; height: 18px; }
+    .admin-nav-label { font-size: .7rem; color: var(--text3); text-transform: uppercase;
+      letter-spacing: .08em; padding: 16px 14px 8px; font-weight: 700; }
+    .admin-section { display: none; }
+    .admin-section.active { display: block; }
+    .page-title { font-size: 1.6rem; font-weight: 800; letter-spacing: -.03em; margin-bottom: 6px; }
+    .page-sub { color: var(--text2); font-size: .9rem; margin-bottom: 28px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .stat-card {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px;
+    }
+    .stat-card-val { font-size: 2rem; font-weight: 900; color: var(--primary); }
+    .stat-card-lbl { font-size: .8rem; color: var(--text2); margin-top: 4px; }
+    .stat-card-icon { margin-bottom: 12px; color: var(--primary); }
+    .stat-card-icon svg { width: 24px; height: 24px; }
+    .data-table { width: 100%; border-collapse: collapse; }
+    .data-table th { text-align: left; padding: 10px 14px; font-size: .75rem; color: var(--text2);
+      text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--border); }
+    .data-table td { padding: 14px; font-size: .85rem; border-bottom: 1px solid rgba(255,255,255,.04); vertical-align: middle; }
+    .data-table tr:hover td { background: rgba(255,255,255,.02); }
+    .table-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .table-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .table-header h3 { font-size: 1rem; font-weight: 700; }
+    .power-bar { height: 6px; border-radius: 99px; background: var(--bg3); overflow: hidden; min-width: 80px; }
+    .power-fill { height: 100%; background: linear-gradient(90deg, var(--primary), #06B6D4); border-radius: 99px; }
+    .occupancy-pill { padding: 3px 10px; border-radius: 99px; font-size: .72rem; font-weight: 600; }
+    .pill-low { background: rgba(16,185,129,.2); color: #10B981; }
+    .pill-med { background: rgba(245,158,11,.2); color: #F59E0B; }
+    .pill-high { background: rgba(239,68,68,.2); color: #EF4444; }
+    .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
+    .chart-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .chart-card h3 { font-size: .95rem; font-weight: 700; margin-bottom: 20px; }
+    .bar-chart { display: flex; align-items: flex-end; gap: 8px; height: 120px; }
+    .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .bar-fill { width: 100%; border-radius: 6px 6px 0 0; background: linear-gradient(180deg, var(--primary), var(--primary-dark));
+      min-height: 4px; transition: height .6s ease; }
+    .bar-lbl { font-size: .65rem; color: var(--text3); }
+    .donut-wrap { display: flex; align-items: center; gap: 20px; }
+    .donut-legend { display: flex; flex-direction: column; gap: 8px; }
+    .donut-item { display: flex; align-items: center; gap: 8px; font-size: .8rem; }
+    .donut-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    @media (max-width: 900px) {
+      .admin-sidebar { display: none; }
+      .admin-main { margin-left: 0; padding: 16px; }
+      .chart-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="nav-brand">
+    <div class="brand-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    </div>
+    <span class="brand-name">VoltFind Admin</span>
+  </div>
+  <div class="nav-links">
+    <a href="index.html" class="nav-link">← Back to App</a>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span class="live-dot" id="live-indicator">Live</span>
+    <div class="user-badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <span>Admin</span>
+    </div>
+  </div>
+</nav>
+
+<div class="admin-layout">
+  <aside class="admin-sidebar">
+    <div class="admin-nav-label">Overview</div>
+    <div class="admin-nav-item active" onclick="showAdminSection('dashboard', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </div>
+    <div class="admin-nav-label">Manage</div>
+    <div class="admin-nav-item" onclick="showAdminSection('stations', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      Stations
+    </div>
+    <div class="admin-nav-item" onclick="showAdminSection('bookings-admin', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      Bookings
+    </div>
+  </aside>
+
+  <main class="admin-main">
+    <!-- Dashboard -->
+    <section class="admin-section active" id="sec-dashboard">
+      <div class="page-title">Dashboard</div>
+      <div class="page-sub">Real-time overview of VoltFind charging network</div>
+      <div class="stats-grid" id="admin-stats-grid">
+        <div class="stat-card"><div class="stat-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div><div class="stat-card-val" id="st-stations">—</div><div class="stat-card-lbl">Total Stations</div></div>
+        <div class="stat-card"><div class="stat-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/></svg></div><div class="stat-card-val" id="st-bookings">—</div><div class="stat-card-lbl">Active Bookings</div></div>
+        <div class="stat-card"><div class="stat-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div><div class="stat-card-val" id="st-revenue">—</div><div class="stat-card-lbl">Total Revenue (₹)</div></div>
+        <div class="stat-card"><div class="stat-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div class="stat-card-val" id="st-occupancy">—</div><div class="stat-card-lbl">Network Occupancy</div></div>
+      </div>
+
+      <div class="chart-row">
+        <div class="chart-card">
+          <h3>Slots by Station (Available vs Total)</h3>
+          <div class="bar-chart" id="bar-chart"></div>
+        </div>
+        <div class="chart-card">
+          <h3>Charger Type Distribution</h3>
+          <div class="donut-wrap">
+            <svg width="110" height="110" viewBox="0 0 110 110" id="donut-svg"></svg>
+            <div class="donut-legend" id="donut-legend"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <div class="table-header"><h3>Network Status</h3></div>
+        <table class="data-table"><thead><tr>
+          <th>Station</th><th>Operator</th><th>Power</th><th>Availability</th><th>Occupancy</th><th>Rating</th>
+        </tr></thead>
+        <tbody id="network-table"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Stations -->
+    <section class="admin-section" id="sec-stations">
+      <div class="page-title">Stations</div>
+      <div class="page-sub">All registered EV charging stations</div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>Station List</h3></div>
+        <table class="data-table"><thead><tr>
+          <th>Name</th><th>Location</th><th>Slots</th><th>Fast?</th><th>Price/kWh</th><th>Wait</th>
+        </tr></thead>
+        <tbody id="stations-table"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Bookings Admin -->
+    <section class="admin-section" id="sec-bookings-admin">
+      <div class="page-title">All Bookings</div>
+      <div class="page-sub">Complete booking records</div>
+      <div class="table-wrap">
+        <div class="table-header">
+          <h3>Booking Records</h3>
+          <button class="btn-primary" style="padding:8px 16px;font-size:.8rem" onclick="exportCSV()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export CSV
+          </button>
+        </div>
+        <table class="data-table"><thead><tr>
+          <th>ID</th><th>Station</th><th>Slot Time</th><th>Charger</th><th>Duration</th><th>Amount</th><th>Status</th>
+        </tr></thead>
+        <tbody id="bookings-table"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const API = 'http://localhost:3000/api';
+
+async function loadDashboard() {
+  const [statsRes, stationsRes, bookingsRes] = await Promise.all([
+    fetch(`${API}/stats`), fetch(`${API}/stations`), fetch(`${API}/bookings`)
+  ]);
+  const { stats } = await statsRes.json();
+  const { stations } = await stationsRes.json();
+  const { bookings } = await bookingsRes.json();
+
+  document.getElementById('st-stations').textContent = stats.totalStations;
+  document.getElementById('st-bookings').textContent = stats.totalBookings;
+  document.getElementById('st-revenue').textContent = stats.revenue.toLocaleString('en-IN');
+  document.getElementById('st-occupancy').textContent = stats.occupancyRate + '%';
+
+  // Bar chart
+  const top = stations.slice(0, 6);
+  const maxSlots = Math.max(...top.map(s => s.total_slots));
+  document.getElementById('bar-chart').innerHTML = top.map(s => {
+    const h = Math.round((s.available_slots / maxSlots) * 100);
+    const name = s.name.split(' – ')[1] || s.name.split(' - ')[1] || s.name.split(' ').slice(-1)[0];
+    return `<div class="bar-col">
+      <div class="bar-fill" style="height:${h}px;background:linear-gradient(180deg,#10B981,#059669)"></div>
+      <div class="bar-lbl">${name.substring(0,8)}</div>
+    </div>`;
+  }).join('');
+
+  // Donut chart
+  const typeCount = {};
+  stations.forEach(s => s.charger_types.forEach(t => { typeCount[t] = (typeCount[t] || 0) + 1; }));
+  const colors = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6'];
+  const total = Object.values(typeCount).reduce((a, b) => a + b, 0);
+  let offset = 0;
+  const donutSvg = document.getElementById('donut-svg');
+  const legend = document.getElementById('donut-legend');
+  const r = 40, cx = 55, cy = 55, circum = 2 * Math.PI * r;
+  donutSvg.innerHTML = '';
+  legend.innerHTML = '';
+  Object.entries(typeCount).forEach(([type, cnt], i) => {
+    const pct = cnt / total;
+    const dash = pct * circum;
+    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circle.setAttribute('cx', cx); circle.setAttribute('cy', cy); circle.setAttribute('r', r);
+    circle.setAttribute('fill','none'); circle.setAttribute('stroke', colors[i % colors.length]);
+    circle.setAttribute('stroke-width','18');
+    circle.setAttribute('stroke-dasharray', `${dash} ${circum - dash}`);
+    circle.setAttribute('stroke-dashoffset', -offset * circum);
+    circle.setAttribute('transform', `rotate(-90 ${cx} ${cy})`);
+    donutSvg.appendChild(circle);
+    offset += pct;
+    legend.innerHTML += `<div class="donut-item"><div class="donut-dot" style="background:${colors[i % colors.length]}"></div><span>${type} (${cnt})</span></div>`;
+  });
+
+  // Network table
+  document.getElementById('network-table').innerHTML = stations.map(s => {
+    const occ = Math.round((1 - s.available_slots / s.total_slots) * 100);
+    const pillClass = occ >= 80 ? 'pill-high' : occ >= 50 ? 'pill-med' : 'pill-low';
+    return `<tr>
+      <td style="font-weight:600">${s.name}</td>
+      <td style="color:var(--text2)">${s.operator}</td>
+      <td>${s.power_kw}kW</td>
+      <td style="color:${s.available_slots === 0 ? '#EF4444' : '#10B981'}">${s.available_slots}/${s.total_slots}</td>
+      <td><span class="occupancy-pill ${pillClass}">${occ}%</span></td>
+      <td style="color:#F59E0B">★ ${s.rating}</td>
+    </tr>`;
+  }).join('');
+
+  // Stations table
+  document.getElementById('stations-table').innerHTML = stations.map(s =>
+    `<tr>
+      <td style="font-weight:600">${s.name}</td>
+      <td style="color:var(--text2);font-size:.8rem">${s.address}</td>
+      <td>${s.total_slots}</td>
+      <td>${s.is_fast_charger ? '<span style="color:#F97316;font-weight:700">Yes</span>' : 'No'}</td>
+      <td>₹${s.price_per_kwh}</td>
+      <td>${s.avg_wait_minutes}m</td>
+    </tr>`
+  ).join('');
+
+  // Bookings table
+  document.getElementById('bookings-table').innerHTML = bookings.length
+    ? bookings.map(b => {
+        const dt = new Date(b.slot_time);
+        const statusColor = b.status === 'confirmed' ? '#10B981' : b.status === 'cancelled' ? '#EF4444' : '#3B82F6';
+        return `<tr>
+          <td style="font-size:.72rem;color:var(--text3)">${b.id.substring(0,8)}…</td>
+          <td style="font-weight:600">${b.station_name}</td>
+          <td style="font-size:.8rem">${dt.toLocaleDateString('en-IN')} ${dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</td>
+          <td>${b.charger_type}</td>
+          <td>${b.duration_hours}hr</td>
+          <td style="font-weight:700">₹${b.amount}</td>
+          <td><span style="color:${statusColor};font-weight:600">${b.status}</span></td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="7" style="text-align:center;color:var(--text2);padding:32px">No bookings yet</td></tr>';
+}
+
+function showAdminSection(name, el) {
+  document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.admin-nav-item').forEach(i => i.classList.remove('active'));
+  document.getElementById(`sec-${name}`).classList.add('active');
+  el.classList.add('active');
+}
+
+loadDashboard();
+const _liveTimer = setInterval(() => {
+  loadDashboard();
+  // Flash live dot
+  const dot = document.getElementById('live-indicator');
+  if (dot) { dot.style.opacity = '0.4'; setTimeout(() => dot.style.opacity = '1', 300); }
+}, 15000);
+
+function exportCSV() {
+  fetch(`${API}/bookings`).then(r => r.json()).then(({ bookings }) => {
+    if (!bookings.length) { alert('No bookings to export.'); return; }
+    const headers = ['ID','Station','Slot Time','Charger','Duration (hrs)','Amount (INR)','Status'];
+    const rows = bookings.map(b => [
+      b.id, `"${b.station_name}"`,
+      new Date(b.slot_time).toLocaleString('en-IN'),
+      b.charger_type, b.duration_hours, b.amount, b.status
+    ]);
+    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `voltfind_bookings_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  });
+}
+</script>
+</body>
+</html>

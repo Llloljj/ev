@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoltFind – Smart EV Charging Station Locator</title>
+  <meta name="description" content="Find nearby EV charging stations in real-time, check availability and book charging slots instantly with VoltFind – India's smartest EV charging platform." />
+
+  <!-- Leaflet.js Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ── Navigation ─────────────────────────────────────────────────────────── -->
+<nav class="navbar" id="navbar">
+  <div class="nav-brand">
+    <div class="brand-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    </div>
+    <span class="brand-name">VoltFind</span>
+  </div>
+  <div class="nav-links">
+    <a href="#" class="nav-link active" onclick="showPage('map')" id="nav-map">Find Stations</a>
+    <a href="#" class="nav-link" onclick="showPage('bookings')" id="nav-bookings">My Bookings</a>
+    <a href="admin.html" class="nav-link">Admin Panel</a>
+  </div>
+  <div class="nav-actions">
+    <button id="theme-toggle" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button>
+    <div class="user-badge" onclick="openUserSwitcher()" title="Switch profile" style="cursor:pointer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      <span id="user-name-nav">Arjun Sharma</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;opacity:.5"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+  </div>
+  <button class="hamburger" id="hamburger" aria-label="Menu" onclick="toggleMobileMenu()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  </button>
+</nav>
+
+<!-- ── Hero Section ─────────────────────────────────────────────────────────── -->
+<div id="hero-section" class="hero-section">
+  <div class="hero-bg-anim"></div>
+  <div class="hero-content">
+    <div class="hero-badge">India's Smartest EV Charging Platform</div>
+    <h1 class="hero-title">Find. Book.<br><span class="hero-accent">Charge.</span></h1>
+    <p class="hero-sub">Locate nearby EV stations in real-time, check live availability, and reserve your slot — all in one place.</p>
+    <div class="hero-stats" id="hero-stats">
+      <div class="hero-stat"><div class="hero-stat-val" id="hstat-stations">0</div><div class="hero-stat-lbl">Stations</div></div>
+      <div class="hero-stat-div"></div>
+      <div class="hero-stat"><div class="hero-stat-val" id="hstat-slots">0</div><div class="hero-stat-lbl">Total Slots</div></div>
+      <div class="hero-stat-div"></div>
+      <div class="hero-stat"><div class="hero-stat-val" id="hstat-cities">0</div><div class="hero-stat-lbl">Cities</div></div>
+    </div>
+    <div class="hero-actions">
+      <button class="hero-btn-primary" onclick="startWithLocation()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        Locate Me
+      </button>
+      <button class="hero-btn-secondary" onclick="skipHero()">
+        Browse Map
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="hero-map-preview">
+    <div class="hero-map-card">
+      <div class="hmc-pulse"></div>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="hmc-icon"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+      <div class="hmc-label">SpeedCharge · Bengaluru</div>
+      <div class="hmc-avail">8/10 slots free</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Map Page ────────────────────────────────────────────────────────────── -->
+<div id="page-map" class="page" style="display:none">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h2>Nearby Stations</h2>
+      <div style="display:flex;gap:6px">
+        <button class="location-btn" onclick="openVehicleProfile()" title="My Vehicle" id="vehicle-profile-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v4h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+        </button>
+        <button class="location-btn" id="locate-btn" onclick="getUserLocation()" title="Use my location">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8" stroke-dasharray="3 3"/></svg>
+        </button>
+        <button class="location-btn" onclick="openPriceEstimator()" title="Cost Estimator">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Search Bar -->
+    <div class="search-bar-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="station-search" class="search-input" placeholder="Search station name…" oninput="filterBySearch(this.value)" />
+      <button class="search-clear" id="search-clear" onclick="clearSearch()" style="display:none" aria-label="Clear">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Vehicle Info Strip (shows active vehicle) -->
+    <div class="vehicle-strip" id="vehicle-strip" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      <span id="vehicle-strip-text">No vehicle set</span>
+      <div class="battery-strip" id="battery-strip-bar"></div>
+      <span id="vehicle-strip-pct"></span>
+    </div>
+
+    <!-- Filters -->
+    <div class="filters">
+      <div class="filter-row">
+        <select id="filter-charger" onchange="applyFilters()">
+          <option value="">All Chargers</option>
+          <option value="CCS2">CCS2 (DC Fast)</option>
+          <option value="CHAdeMO">CHAdeMO</option>
+          <option value="Type2">Type 2 (AC)</option>
+          <option value="GB/T">GB/T</option>
+        </select>
+        <select id="filter-radius" onchange="applyFilters()">
+          <option value="10">10 km</option>
+          <option value="25">25 km</option>
+          <option value="50" selected>50 km</option>
+          <option value="100">100 km</option>
+        </select>
+      </div>
+      <div class="filter-row">
+        <select id="sort-select" onchange="applySort(this.value)" style="flex:1">
+          <option value="default">Sort: Default</option>
+          <option value="available">Sort: Most Available</option>
+          <option value="rating">Sort: Top Rated</option>
+          <option value="price">Sort: Lowest Price</option>
+          <option value="distance">Sort: Nearest</option>
+        </select>
+      </div>
+      <div class="filter-toggles">
+        <label class="toggle-chip" id="chip-fast">
+          <input type="checkbox" id="filter-fast" onchange="applyFilters()" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          Fast Only
+        </label>
+        <label class="toggle-chip" id="chip-available">
+          <input type="checkbox" id="filter-available" onchange="applyFilters()" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
+          Available
+        </label>
+        <label class="toggle-chip" id="chip-favs">
+          <input type="checkbox" id="filter-favs" onchange="renderStationList(allStations)" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          Favourites
+        </label>
+      </div>
+    </div>
+
+    <!-- Station List -->
+    <div class="station-list" id="station-list">
+      <div class="loading-skeleton">
+        <div class="skel-card"></div>
+        <div class="skel-card"></div>
+        <div class="skel-card"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Map Container -->
+  <div class="map-container">
+    <div id="map"></div>
+
+    <!-- Map Controls Overlay -->
+    <div class="map-overlay-controls">
+      <button class="map-ctrl-btn" onclick="getUserLocation()" title="My Location">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+      </button>
+      <button class="map-ctrl-btn" id="heatmap-btn" onclick="toggleHeatmap()" title="Demand Heatmap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+      </button>
+      <button class="map-ctrl-btn" onclick="map.zoomIn()" title="Zoom In">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button class="map-ctrl-btn" onclick="map.zoomOut()" title="Zoom Out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+
+    <!-- Station Detail Panel (slides in) -->
+    <div class="station-detail-panel" id="station-detail" aria-hidden="true">
+      <button class="close-panel-btn" onclick="closeStationDetail()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div id="station-detail-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Bookings Page ───────────────────────────────────────────────────────── -->
+<div id="page-bookings" class="page">
+  <div class="bookings-container">
+    <div class="bookings-header">
+      <div>
+        <h1>My Charging Sessions</h1>
+        <p>Track and manage your EV charging bookings</p>
+      </div>
+      <button class="btn-primary" onclick="showPage('map')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Book New Slot
+      </button>
+    </div>
+
+    <div class="bookings-stats" id="booking-stats-row"></div>
+
+    <div class="bookings-grid" id="bookings-grid">
+      <div class="loading-text">Loading your bookings...</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Booking Modal ───────────────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="booking-modal" aria-hidden="true" onclick="closeModal(event)">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-header">
+      <div>
+        <h3 id="modal-title">Book Charging Slot</h3>
+        <p id="modal-station-name" class="modal-subtitle"></p>
+      </div>
+      <button class="modal-close" onclick="closeBookingModal()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- ── Toast Notification ─────────────────────────────────────────────────── -->
+<div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+<!-- ── Vehicle Profile Modal ──────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="vehicle-modal" aria-hidden="true" onclick="closeVehicleModal(event)">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:460px">
+    <div class="modal-header">
+      <div>
+        <h3>My Vehicle Profile</h3>
+        <p class="modal-subtitle">Set your EV details for smart recommendations</p>
+      </div>
+      <button class="modal-close" onclick="closeVehicleProfileModal()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="v-model">Vehicle Model</label>
+        <select class="form-control" id="v-model">
+          <option value="">-- Select your EV --</option>
+          <option>Tata Nexon EV</option>
+          <option>Tata Tiago EV</option>
+          <option>MG ZS EV</option>
+          <option>MG Comet EV</option>
+          <option>Hyundai Kona Electric</option>
+          <option>Kia EV6</option>
+          <option>BYD Atto 3</option>
+          <option>Ather 450X (Scooter)</option>
+          <option>Ola S1 Pro (Scooter)</option>
+          <option>Hero Vida V1 (Scooter)</option>
+          <option>TVS iQube (Scooter)</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="v-custom">Custom Model Name (if Other)</label>
+        <input class="form-control" type="text" id="v-custom" placeholder="e.g. My Custom EV" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="v-years">Years Used <span id="v-years-val" style="color:var(--primary);font-weight:700">0</span> yr</label>
+        <input class="form-control" type="range" id="v-years" min="0" max="15" value="0" oninput="document.getElementById('v-years-val').textContent=this.value" style="padding:4px 0" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="v-range">Vehicle Range (km) <span id="v-range-val" style="color:var(--primary);font-weight:700">300</span> km</label>
+        <input class="form-control" type="range" id="v-range" min="80" max="600" step="10" value="300" oninput="document.getElementById('v-range-val').textContent=this.value" style="padding:4px 0" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="v-battery">Current Battery <span id="v-battery-val" style="color:var(--primary);font-weight:700">80</span>%</label>
+        <div class="battery-slider-wrap">
+          <input type="range" id="v-battery" min="0" max="100" value="80" oninput="updateBatterySlider(this.value)" />
+          <div class="battery-visual" id="battery-visual">
+            <div class="battery-body">
+              <div class="battery-fill" id="battery-fill"></div>
+            </div>
+            <div class="battery-tip"></div>
+          </div>
+        </div>
+        <div id="battery-warning" style="display:none;margin-top:8px;padding:8px 12px;border-radius:8px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#EF4444;font-size:.8rem">
+          Low battery! Find a station near you immediately.
+        </div>
+      </div>
+      <button class="btn-primary" style="width:100%;justify-content:center" onclick="saveVehicleProfile()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save Vehicle Profile
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Post-Booking Navigation Modal ─────────────────────────────────────── -->
+<div class="modal-backdrop" id="nav-modal" aria-hidden="true" onclick="closeNavModal(event)">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:420px">
+    <div class="modal-header" style="border-bottom:none;padding-bottom:8px">
+      <div>
+        <h3 id="nav-modal-title">Booking Confirmed!</h3>
+        <p class="modal-subtitle" id="nav-modal-sub"></p>
+      </div>
+      <button class="modal-close" onclick="document.getElementById('nav-modal').classList.remove('open')" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="nav-modal-card" id="nav-modal-card">
+        <div class="nav-modal-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+        </div>
+        <div>
+          <div id="nav-modal-station" style="font-weight:700;font-size:1rem;margin-bottom:4px"></div>
+          <div id="nav-modal-addr" style="font-size:.82rem;color:var(--text2)"></div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+        <a class="btn-primary" id="nav-modal-gmaps" href="#" target="_blank" style="justify-content:center;text-decoration:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+          Open in Google Maps
+        </a>
+        <button class="btn-secondary" style="justify-content:center" onclick="document.getElementById('nav-modal').classList.remove('open');showPage('bookings')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          View My Bookings
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+
+<!-- Price Estimator Modal -->
+<div class="modal-backdrop" id="estimator-modal" aria-hidden="true" onclick="if(event.target.id==='estimator-modal')closeEstimatorModal()">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <div>
+        <h3>⚡ Cost Estimator</h3>
+        <p class="modal-subtitle" id="est-station-name"></p>
+      </div>
+      <button class="modal-close" onclick="closeEstimatorModal()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="est-rate-badge">Rate: <strong id="est-rate"></strong></div>
+      <div class="form-group">
+        <label class="form-label" for="est-capacity">Battery Capacity (kWh)</label>
+        <input class="form-control" type="number" id="est-capacity" min="5" max="100" value="30" oninput="calcEstimate()">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="est-from">Current Battery: <span id="est-from-val" style="color:var(--primary);font-weight:700">20</span>%</label>
+        <input class="form-control" type="range" id="est-from" min="0" max="100" value="20" oninput="document.getElementById('est-from-val').textContent=this.value;calcEstimate()" style="padding:4px 0">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="est-to">Target Battery: <span id="est-to-val" style="color:var(--success);font-weight:700">80</span>%</label>
+        <input class="form-control" type="range" id="est-to" min="0" max="100" value="80" oninput="document.getElementById('est-to-val').textContent=this.value;calcEstimate()" style="padding:4px 0">
+      </div>
+      <div class="est-result-grid">
+        <div class="est-result-card">
+          <div class="est-result-val" id="est-kwh">—</div>
+          <div class="est-result-lbl">Energy Needed</div>
+        </div>
+        <div class="est-result-card">
+          <div class="est-result-val" id="est-hrs">—</div>
+          <div class="est-result-lbl">Est. Duration</div>
+        </div>
+        <div class="est-result-card est-highlight">
+          <div class="est-result-val" id="est-cost">—</div>
+          <div class="est-result-lbl">Total Cost</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- User Switcher Modal -->
+<div class="modal-backdrop" id="user-switcher-modal" aria-hidden="true" onclick="closeUserSwitcher(event)">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <div><h3>Switch Profile</h3><p class="modal-subtitle">Demo accounts for presentation</p></div>
+      <button class="modal-close" onclick="document.getElementById('user-switcher-modal').classList.remove('open')" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+      <div class="user-profile-card" id="ucard-user-demo-1" onclick="switchUser('user-demo-1','Arjun Sharma','Tata Nexon EV')">
+        <div class="upc-avatar" style="background:linear-gradient(135deg,#3B82F6,#06B6D4)">A</div>
+        <div class="upc-info"><div class="upc-name">Arjun Sharma</div><div class="upc-vehicle">Tata Nexon EV</div></div>
+        <div class="upc-check" id="check-user-demo-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+      </div>
+      <div class="user-profile-card" id="ucard-user-demo-2" onclick="switchUser('user-demo-2','Priya Patel','MG ZS EV')">
+        <div class="upc-avatar" style="background:linear-gradient(135deg,#8B5CF6,#EC4899)">P</div>
+        <div class="upc-info"><div class="upc-name">Priya Patel</div><div class="upc-vehicle">MG ZS EV</div></div>
+        <div class="upc-check" id="check-user-demo-2" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Payment Simulation Modal -->
+<div class="modal-backdrop" id="payment-modal" aria-hidden="true">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <div><h3>Secure Payment</h3><p class="modal-subtitle" id="pay-amount-sub"></p></div>
+      <button class="modal-close" onclick="closePaymentModal()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="pay-methods">
+        <div class="pay-method selected" onclick="selectPayMethod(this)"><div class="pay-icon pay-upi">UPI</div><span>GPay</span></div>
+        <div class="pay-method" onclick="selectPayMethod(this)"><div class="pay-icon pay-hdfc">H</div><span>HDFC</span></div>
+        <div class="pay-method" onclick="selectPayMethod(this)"><div class="pay-icon pay-sbi">S</div><span>SBI</span></div>
+        <div class="pay-method" onclick="selectPayMethod(this)"><div class="pay-icon pay-paytm">P</div><span>Paytm</span></div>
+      </div>
+      <div class="pay-summary">
+        <div class="price-row"><span>Booking Amount</span><span id="pay-base"></span></div>
+        <div class="price-row"><span>Platform Fee</span><span>&#8377;5</span></div>
+        <div class="price-row"><span style="font-weight:700">Total</span><span id="pay-total" style="color:var(--primary);font-weight:800"></span></div>
+      </div>
+      <button class="btn-primary" style="width:100%;justify-content:center;margin-top:8px" id="pay-btn" onclick="processPayment()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span id="pay-btn-text">Pay Now</span>
+      </button>
+      <div class="pay-secure">256-bit SSL encrypted &middot; Secured by VoltPay</div>
+    </div>
+  </div>
+</div>
+
+<footer class="site-footer" id="page-bookings-footer" style="margin-top:auto">
+  <span>© 2026 VoltFind · India's Smartest EV Charging Platform</span>
+  <span style="display:flex;gap:20px;align-items:center">
+    <a href="architecture.html" target="_blank">System Architecture</a>
+    <a href="admin.html">Admin Panel</a>
+    <span>Built with ♥ for a greener future</span>
+  </span>
+</footer>
+</body>
+</html>
