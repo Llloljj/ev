@@ -5,7 +5,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
@@ -64,7 +64,7 @@ const seedStations = () => {
 
   const stations = [
     {
-      id: uuidv4(), name: 'VoltFind Hub - Connaught Place', address: 'Connaught Place, New Delhi, 110001',
+      id: uuidv4(), name: 'EV PATH Hub - Connaught Place', address: 'Connaught Place, New Delhi, 110001',
       latitude: 28.6315, longitude: 77.2167, charger_types: JSON.stringify(['CCS2', 'Type2', 'CHAdeMO']),
       total_slots: 8, available_slots: 5, price_per_kwh: 12.5, avg_wait_minutes: 10,
       amenities: JSON.stringify(['Restroom', 'WiFi', 'Cafe', 'Parking']), rating: 4.7,
@@ -343,7 +343,7 @@ app.get('/{*path}', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n⚡ VoltFind EV Charging Platform`);
+  console.log(`\n⚡ EV PATH Charging Platform`);
   console.log(`🌐 Running at http://localhost:${PORT}`);
   console.log(`📊 Admin panel at http://localhost:${PORT}/admin.html\n`);
 });

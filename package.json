@@ -1,5 +1,5 @@
 {
-  "name": "ev-man",
+  "name": "ev-path",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -11,6 +11,9 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
     "cors": "^2.8.6",
