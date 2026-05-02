@@ -229,6 +229,67 @@ app.post('/api/auth/google', async (req, res) => {
   }
 });
 
+// GET /auth/callback — OAuth2 redirect callback (exchanges code for user info)
+app.get('/auth/callback', async (req, res) => {
+  const { code, error } = req.query;
+  if (error || !code) {
+    return res.redirect('/login.html?error=' + encodeURIComponent(error || 'no_code'));
+  }
+
+  const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+  const redirectUri = (process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + PORT) + '/auth/callback';
+
+  try {
+    // Exchange code for tokens
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      })
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.id_token) throw new Error('No id_token: ' + JSON.stringify(tokenData));
+
+    // Verify the id_token
+    const ticket = await googleClient.verifyIdToken({
+      idToken: tokenData.id_token,
+      audience: GOOGLE_CLIENT_ID
+    });
+    const payload = ticket.getPayload();
+    const { sub: google_id, email, name, picture } = payload;
+
+    // Upsert user
+    let user = db.prepare('SELECT * FROM google_users WHERE google_id=?').get(google_id);
+    if (!user) {
+      const id = uuidv4();
+      db.prepare('INSERT INTO google_users (id,google_id,email,name,picture) VALUES (?,?,?,?,?)').run(id, google_id, email, name, picture || null);
+      user = db.prepare('SELECT * FROM google_users WHERE id=?').get(id);
+    } else {
+      db.prepare('UPDATE google_users SET last_login=datetime("now"),name=?,picture=? WHERE google_id=?').run(name, picture || null, google_id);
+      user = db.prepare('SELECT * FROM google_users WHERE google_id=?').get(google_id);
+    }
+
+    // Create session
+    const sessionToken = uuidv4();
+    const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare('INSERT INTO user_sessions (token,user_id,expires_at) VALUES (?,?,?)').run(sessionToken, user.id, expires);
+
+    console.log(`✅ Google OAuth callback: ${email}`);
+
+    // Redirect to login page with token; JS will store it and route appropriately
+    const needsVehicle = !user.vehicle_model;
+    res.redirect(`/login.html?token=${sessionToken}&step=${needsVehicle ? 2 : 'done'}`);
+  } catch (e) {
+    console.error('OAuth callback error:', e.message);
+    res.redirect('/login.html?error=' + encodeURIComponent('Auth failed: ' + e.message));
+  }
+});
+
 // GET /api/auth/me — Get current user by session token
 app.get('/api/auth/me', (req, res) => {
   const token = req.headers['x-session-token'];

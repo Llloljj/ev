@@ -7,10 +7,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <div class="login-page">
+
+    <!-- Step 1: Google Sign In -->
     <div class="login-card" id="login-step-1">
       <div class="login-logo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
@@ -18,43 +19,50 @@
       </div>
       <h2>Welcome Back</h2>
       <p>Sign in to find, book, and charge your EV instantly.</p>
-      
-      <div class="g_id_signin"
-         data-type="standard"
-         data-shape="rectangular"
-         data-theme="outline"
-         data-text="signin_with"
-         data-size="large"
-         data-logo_alignment="left"
-         data-width="320">
-      </div>
-      
-      <div id="g_id_onload"
-         data-client_id="340559256597-kud6141s27hbjh92dr7m10ofkq9cmane.apps.googleusercontent.com"
-         data-context="signin"
-         data-ux_mode="popup"
-         data-callback="handleGoogleLogin"
-         data-auto_prompt="false">
-      </div>
+
+      <!-- Custom Google Sign-In Button -->
+      <button id="google-signin-btn" onclick="startGoogleLogin()" style="
+        display: flex; align-items: center; gap: 12px; justify-content: center;
+        width: 100%; margin-top: 2rem; padding: 13px 20px;
+        background: #fff; color: #1f1f1f; border: 1px solid #dadce0;
+        border-radius: 10px; font-size: 0.95rem; font-weight: 600;
+        cursor: pointer; transition: all 0.2s; font-family: 'Inter', sans-serif;
+      " onmouseover="this.style.boxShadow='0 2px 12px rgba(0,0,0,0.15)'" onmouseout="this.style.boxShadow='none'">
+        <svg width="20" height="20" viewBox="0 0 48 48">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.36-8.16 2.36-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+          <path fill="none" d="M0 0h48v48H0z"/>
+        </svg>
+        Continue with Google
+      </button>
+
+      <div id="login-error" style="display:none; margin-top:1rem; padding:12px 16px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; color:#ef4444; font-size:0.85rem; text-align:left;"></div>
+
+      <p style="margin-top: 1.5rem; font-size: 0.75rem; color: var(--text3); line-height: 1.5;">
+        By continuing, you agree to our Terms of Service and Privacy Policy. Your data is stored securely.
+      </p>
     </div>
 
+    <!-- Step 2: Vehicle Setup -->
     <div class="login-card" id="login-step-2" style="display: none;">
       <h2>Complete Profile</h2>
-      <p>Set up your vehicle details to get started.</p>
-      
+      <p>Set up your vehicle details to get personalized insights.</p>
+
       <div class="form-group" style="margin-top: 1.5rem;">
         <label class="form-label" for="vehicle-input">Vehicle Model</label>
-        <input class="form-control" type="text" id="vehicle-input" placeholder="e.g. Tata Nexon EV">
+        <input class="form-control" type="text" id="vehicle-input" placeholder="e.g. Tata Nexon EV, MG ZS EV">
       </div>
-      
+
       <div class="form-group">
         <label class="form-label" for="years-input">Years Used: <span id="years-val" style="color:var(--primary);font-weight:700">0</span> yr</label>
         <input class="form-control" type="range" id="years-input" min="0" max="15" value="0" oninput="document.getElementById('years-val').textContent=this.value; updateDegradation();" style="padding:4px 0">
       </div>
-      
+
       <div class="form-group">
-        <label class="form-label" for="capacity-input">Battery Capacity (kWh)</label>
-        <input class="form-control" type="number" id="capacity-input" placeholder="e.g. 30.2" oninput="updateDegradation()">
+        <label class="form-label" for="capacity-input">Original Battery Capacity (kWh)</label>
+        <input class="form-control" type="number" id="capacity-input" placeholder="e.g. 30.2 for Nexon, 50.3 for ZS EV" oninput="updateDegradation()">
       </div>
 
       <div class="degradation-result">
@@ -72,38 +80,82 @@
         <p class="degrad-note">Based on avg Li-ion degradation rate of 2.3%/year</p>
       </div>
 
-      <button class="btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;" onclick="saveVehicleSetup()">
-        Save & Continue
+      <div id="save-error" style="display:none; margin-top:1rem; padding:12px 16px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; color:#ef4444; font-size:0.85rem;"></div>
+
+      <button class="btn-primary" id="save-btn" style="width: 100%; justify-content: center; margin-top: 1rem;" onclick="saveVehicleSetup()">
+        Save &amp; Continue
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px; margin-left: 8px;"><polyline points="9 18 15 12 9 6"/></svg>
       </button>
     </div>
+
   </div>
 
   <script>
-    function handleGoogleLogin(response) {
-      fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: response.credential })
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) {
-          localStorage.setItem('ev_session_token', data.token);
-          if (!data.user.vehicle_model) {
-            document.getElementById('login-step-1').style.display = 'none';
-            document.getElementById('login-step-2').style.display = 'block';
-          } else {
-            window.location.href = '/';
-          }
-        } else {
-          alert('Login failed: ' + data.message);
+    const CLIENT_ID = '340559256597-kud6141s27hbjh92dr7m10ofkq9cmane.apps.googleusercontent.com';
+
+    // ── Handle redirect back from Google OAuth ──
+    window.addEventListener('DOMContentLoaded', () => {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token');
+      const step  = params.get('step');
+      const error = params.get('error');
+
+      // Show any error from callback
+      if (error) {
+        showLoginError(decodeURIComponent(error));
+        return;
+      }
+
+      // Server sent us a token via redirect
+      if (token) {
+        localStorage.setItem('ev_session_token', token);
+        if (step === 'done') {
+          window.location.href = '/';
+          return;
         }
-      })
-      .catch(err => {
-        console.error('Auth error:', err);
-        alert('An error occurred during login.');
+        if (step === '2') {
+          document.getElementById('login-step-1').style.display = 'none';
+          document.getElementById('login-step-2').style.display = 'block';
+          return;
+        }
+      }
+
+      // Already logged in? Go straight to app
+      const existing = localStorage.getItem('ev_session_token');
+      if (existing) {
+        fetch('/api/auth/me', { headers: { 'x-session-token': existing } })
+          .then(r => r.json())
+          .then(data => { if (data.success) window.location.href = '/'; })
+          .catch(() => {});
+      }
+    });
+
+    function startGoogleLogin() {
+      const btn = document.getElementById('google-signin-btn');
+      btn.textContent = 'Redirecting to Google...';
+      btn.disabled = true;
+
+      const redirectUri = window.location.origin + '/auth/callback';
+      const params = new URLSearchParams({
+        client_id: CLIENT_ID,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: 'openid email profile',
+        access_type: 'offline',
+        prompt: 'select_account'
       });
+      window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+    }
+
+    function showLoginError(msg) {
+      const el = document.getElementById('login-error');
+      el.textContent = '⚠ ' + msg;
+      el.style.display = 'block';
+      const btn = document.getElementById('google-signin-btn');
+      btn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.36-8.16 2.36-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+        Try Again with Google`;
+      btn.disabled = false;
     }
 
     function updateDegradation() {
@@ -111,32 +163,46 @@
       const capacity = parseFloat(document.getElementById('capacity-input').value) || 0;
       const degradPct = Math.min(years * 2.3, 30).toFixed(1);
       const effectiveCap = (capacity * (1 - degradPct/100)).toFixed(1);
-      
       document.getElementById('degrad-pct').textContent = degradPct + '%';
       document.getElementById('effective-cap').textContent = effectiveCap + ' kWh';
-      
       const bar = document.getElementById('degrad-bar');
       bar.style.width = (degradPct / 30) * 100 + '%';
       bar.style.background = degradPct < 10 ? '#22c55e' : degradPct < 20 ? '#f59e0b' : '#ef4444';
     }
 
     function saveVehicleSetup() {
-      const vehicle_model = document.getElementById('vehicle-input').value;
-      const years_used = document.getElementById('years-input').value;
-      const battery_capacity_kwh = document.getElementById('capacity-input').value;
-      
-      if (!vehicle_model || !battery_capacity_kwh) {
-        alert('Please fill in all details');
+      const vehicle_model = document.getElementById('vehicle-input').value.trim();
+      const years_used = parseInt(document.getElementById('years-input').value) || 0;
+      const battery_capacity_kwh = parseFloat(document.getElementById('capacity-input').value);
+
+      document.getElementById('save-error').style.display = 'none';
+
+      if (!vehicle_model) {
+        document.getElementById('save-error').textContent = '⚠ Please enter your vehicle model.';
+        document.getElementById('save-error').style.display = 'block';
+        return;
+      }
+      if (!battery_capacity_kwh || battery_capacity_kwh <= 0) {
+        document.getElementById('save-error').textContent = '⚠ Please enter a valid battery capacity (e.g. 30.2).';
+        document.getElementById('save-error').style.display = 'block';
         return;
       }
 
+      const btn = document.getElementById('save-btn');
+      btn.textContent = 'Saving...';
+      btn.disabled = true;
+
       const token = localStorage.getItem('ev_session_token');
+      if (!token) {
+        document.getElementById('save-error').textContent = '⚠ Session expired. Please sign in again.';
+        document.getElementById('save-error').style.display = 'block';
+        setTimeout(() => window.location.href = '/login.html', 2000);
+        return;
+      }
+
       fetch('/api/auth/vehicle', {
         method: 'PATCH',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-session-token': token
-        },
+        headers: { 'Content-Type': 'application/json', 'x-session-token': token },
         body: JSON.stringify({ vehicle_model, years_used, battery_capacity_kwh })
       })
       .then(res => res.json())
@@ -144,10 +210,17 @@
         if (data.success) {
           window.location.href = '/';
         } else {
-          alert('Failed to save vehicle details');
+          document.getElementById('save-error').textContent = '⚠ ' + (data.message || 'Failed to save. Please try again.');
+          document.getElementById('save-error').style.display = 'block';
+          btn.textContent = 'Save & Continue';
+          btn.disabled = false;
         }
+      })
+      .catch(() => {
+        document.getElementById('save-error').textContent = '⚠ Network error. Is the server running?';
+        document.getElementById('save-error').style.display = 'block';
+        btn.textContent = 'Save & Continue';
+        btn.disabled = false;
       });
     }
   </script>
-</body>
-</html>
