@@ -1,24 +1,72 @@
-/* ── VoltFind Frontend ── */
+/* ── EV PATH Frontend ── */
 const API = 'http://localhost:3000/api';
-let DEMO_USER = localStorage.getItem('voltfind_user') || 'user-demo-1';
-let DEMO_USER_NAME = localStorage.getItem('voltfind_user_name') || 'Arjun Sharma';
+let DEMO_USER = null;
+let DEMO_USER_NAME = null;
 
 let map, userMarker, stationMarkers = [], allStations = [], selectedStation = null, selectedSlot = null;
 let routeLayer = null;
 let userLat = null, userLng = null;
-let vehicleProfile = JSON.parse(localStorage.getItem('voltfind_vehicle') || 'null');
+let vehicleProfile = JSON.parse(localStorage.getItem('evpath_vehicle') || 'null');
 let heatmapLayers = [], heatmapOn = false;
 let pendingBookingData = null;
 
 // ── Favourites & Sort ──────────────────────────────────────────
-let favorites = new Set(JSON.parse(localStorage.getItem('voltfind_favs') || '[]'));
+let favorites = new Set(JSON.parse(localStorage.getItem('evpath_favs') || '[]'));
 let currentSort = 'default';
 
 // ── Theme ──────────────────────────────────────────────────────
-let isDark = localStorage.getItem('voltfind_theme') !== 'light';
+let isDark = localStorage.getItem('evpath_theme') !== 'light';
 
 // ── Init ───────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  const token = localStorage.getItem('ev_session_token');
+  if (!token) {
+    if (window.location.pathname !== '/login.html') {
+      window.location.href = '/login.html';
+      return;
+    }
+  } else {
+    try {
+      const res = await fetch(`${API}/auth/me`, { headers: { 'x-session-token': token }});
+      const data = await res.json();
+      if (!data.success) {
+        localStorage.removeItem('ev_session_token');
+        if (window.location.pathname !== '/login.html') window.location.href = '/login.html';
+        return;
+      }
+      DEMO_USER = data.user.id;
+      DEMO_USER_NAME = data.user.name;
+      
+      // Handle missing vehicle setup
+      if (!data.user.vehicle_model && window.location.pathname !== '/login.html') {
+        window.location.href = '/login.html';
+        return;
+      }
+      
+      // Update nav with user info
+      const navBadge = document.querySelector('.user-badge');
+      if (navBadge) {
+        navBadge.innerHTML = `
+          ${data.user.picture ? `<img src="${data.user.picture}" style="width:20px;height:20px;border-radius:50%">` : `<div style="width:20px;height:20px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px">${data.user.name.charAt(0)}</div>`}
+          <span id="user-name-nav">${data.user.name}</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;opacity:.5"><polyline points="6 9 12 15 18 9"/></svg>
+        `;
+        // Replace click to user switcher with logout
+        navBadge.onclick = async () => {
+          if (confirm('Are you sure you want to log out?')) {
+            await fetch(`${API}/auth/logout`, { method: 'POST', headers: { 'x-session-token': token }});
+            localStorage.removeItem('ev_session_token');
+            window.location.href = '/login.html';
+          }
+        };
+      }
+    } catch (e) {
+      console.error('Auth check failed:', e);
+    }
+  }
+
+  if (window.location.pathname === '/login.html') return;
+
   initMap();
   loadStations();
   checkPage();
@@ -184,7 +232,7 @@ function renderMapMarkers(stations) {
     m.bindPopup(`<div class="popup-content">
       <h4>${s.name}</h4>
       <div class="popup-avail" style="color:${color}">${avail}/${s.total_slots} slots available</div>
-      <button class="popup-btn" onclick="openStationDetail('${s.id}')">View & Book</button>
+      <button class="popup-btn" onclick="map.closePopup(); openStationDetail('${s.id}')">View & Book</button>
     </div>`);
     m.on('click', () => openStationDetail(s.id));
     stationMarkers.push(m);
@@ -313,6 +361,7 @@ async function drawRoadRoute(sLat, sLng) {
 async function openBookingModal(stationId) {
   const s = allStations.find(x => x.id === stationId) || selectedStation;
   document.getElementById('modal-station-name').textContent = s.name;
+  closeStationDetail();
   document.getElementById('booking-modal').classList.add('open');
 
   const today = new Date().toISOString().split('T')[0];
@@ -569,7 +618,7 @@ function saveVehicleProfile() {
     rangeKm:    parseInt(document.getElementById('v-range').value),
     batteryPct: parseInt(document.getElementById('v-battery').value)
   };
-  localStorage.setItem('voltfind_vehicle', JSON.stringify(vehicleProfile));
+  localStorage.setItem('evpath_vehicle', JSON.stringify(vehicleProfile));
   closeVehicleProfileModal();
   applyVehicleProfileUI();
   showToast(`Vehicle saved: ${model}`, 'success');
@@ -717,8 +766,8 @@ function closeUserSwitcher(e) {
 function switchUser(userId, name, vehicle) {
   DEMO_USER      = userId;
   DEMO_USER_NAME = name;
-  localStorage.setItem('voltfind_user', userId);
-  localStorage.setItem('voltfind_user_name', name);
+  localStorage.setItem('evpath_user', userId);
+  localStorage.setItem('evpath_user_name', name);
   document.getElementById('user-switcher-modal').classList.remove('open');
   updateNavUser();
   showToast(`Switched to ${name} (${vehicle})`, 'success');
@@ -789,7 +838,7 @@ function initTheme() {
 function toggleTheme() {
   isDark = !isDark;
   document.body.classList.toggle('light-mode', !isDark);
-  localStorage.setItem('voltfind_theme', isDark ? 'dark' : 'light');
+  localStorage.setItem('evpath_theme', isDark ? 'dark' : 'light');
   syncThemeIcon();
 }
 function syncThemeIcon() {
@@ -804,7 +853,7 @@ function syncThemeIcon() {
 function toggleFavorite(id, e) {
   e.stopPropagation();
   if (favorites.has(id)) favorites.delete(id); else favorites.add(id);
-  localStorage.setItem('voltfind_favs', JSON.stringify([...favorites]));
+  localStorage.setItem('evpath_favs', JSON.stringify([...favorites]));
   const isFav = favorites.has(id);
   const btn = document.querySelector(`#sc-${id} .fav-btn`);
   if (btn) {

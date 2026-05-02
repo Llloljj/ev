@@ -3,6 +3,10 @@ const Database = require('better-sqlite3');
 const cors = require('cors');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { OAuth2Client } = require('google-auth-library');
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -54,6 +58,28 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (station_id) REFERENCES stations(id),
     FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS google_users (
+    id TEXT PRIMARY KEY,
+    google_id TEXT UNIQUE NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    picture TEXT,
+    vehicle_model TEXT,
+    years_used INTEGER DEFAULT 0,
+    battery_capacity_kwh REAL,
+    degradation_pct REAL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_login TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS user_sessions (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES google_users(id)
   );
 `);
 
@@ -166,6 +192,78 @@ function haversine(lat1, lon1, lat2, lon2) {
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
+// ─── Auth Routes ───────────────────────────────────────────────────────────────
+
+// POST /api/auth/google — Verify Google ID token, upsert user, create session
+app.post('/api/auth/google', async (req, res) => {
+  const { credential } = req.body;
+  if (!credential) return res.status(400).json({ success: false, message: 'No credential provided' });
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID || undefined,
+    });
+    const payload = ticket.getPayload();
+    const { sub: google_id, email, name, picture } = payload;
+
+    let user = db.prepare('SELECT * FROM google_users WHERE google_id=?').get(google_id);
+    if (!user) {
+      const id = uuidv4();
+      db.prepare('INSERT INTO google_users (id,google_id,email,name,picture) VALUES (?,?,?,?,?)').run(id, google_id, email, name, picture || null);
+      user = db.prepare('SELECT * FROM google_users WHERE id=?').get(id);
+    } else {
+      db.prepare('UPDATE google_users SET last_login=datetime("now"),name=?,picture=? WHERE google_id=?').run(name, picture || null, google_id);
+      user = db.prepare('SELECT * FROM google_users WHERE google_id=?').get(google_id);
+    }
+
+    const token = uuidv4();
+    const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare('INSERT INTO user_sessions (token,user_id,expires_at) VALUES (?,?,?)').run(token, user.id, expires);
+
+    console.log(`✅ Google login: ${email}`);
+    res.json({ success: true, token, user });
+  } catch (e) {
+    console.error('Google auth error:', e.message);
+    res.status(401).json({ success: false, message: 'Invalid Google token: ' + e.message });
+  }
+});
+
+// GET /api/auth/me — Get current user by session token
+app.get('/api/auth/me', (req, res) => {
+  const token = req.headers['x-session-token'];
+  if (!token) return res.status(401).json({ success: false, message: 'No token' });
+  const session = db.prepare('SELECT * FROM user_sessions WHERE token=? AND expires_at > datetime("now")').get(token);
+  if (!session) return res.status(401).json({ success: false, message: 'Session expired' });
+  const user = db.prepare('SELECT * FROM google_users WHERE id=?').get(session.user_id);
+  res.json({ success: true, user });
+});
+
+// PATCH /api/auth/vehicle — Save vehicle model + degradation calc
+app.patch('/api/auth/vehicle', (req, res) => {
+  const token = req.headers['x-session-token'];
+  if (!token) return res.status(401).json({ success: false });
+  const session = db.prepare('SELECT * FROM user_sessions WHERE token=? AND expires_at > datetime("now")').get(token);
+  if (!session) return res.status(401).json({ success: false, message: 'Session expired' });
+
+  const { vehicle_model, years_used, battery_capacity_kwh } = req.body;
+  // Industry avg Li-ion degradation: ~2.3% per year, capped at 30%
+  const degradation_pct = Math.min((parseInt(years_used) || 0) * 2.3, 30);
+  const effective_capacity = (parseFloat(battery_capacity_kwh) || 0) * (1 - degradation_pct / 100);
+
+  db.prepare('UPDATE google_users SET vehicle_model=?,years_used=?,battery_capacity_kwh=?,degradation_pct=? WHERE id=?')
+    .run(vehicle_model || null, parseInt(years_used) || 0, parseFloat(battery_capacity_kwh) || null, degradation_pct, session.user_id);
+
+  const user = db.prepare('SELECT * FROM google_users WHERE id=?').get(session.user_id);
+  res.json({ success: true, user, degradation_pct, effective_capacity: Math.round(effective_capacity * 10) / 10 });
+});
+
+// POST /api/auth/logout
+app.post('/api/auth/logout', (req, res) => {
+  const token = req.headers['x-session-token'];
+  if (token) db.prepare('DELETE FROM user_sessions WHERE token=?').run(token);
+  res.json({ success: true });
+});
 
 // ─── API Routes ────────────────────────────────────────────────────────────────
 

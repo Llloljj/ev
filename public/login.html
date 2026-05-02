@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login – EV PATH</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-card" id="login-step-1">
+      <div class="login-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        <span>EV PATH</span>
+      </div>
+      <h2>Welcome Back</h2>
+      <p>Sign in to find, book, and charge your EV instantly.</p>
+      
+      <div class="g_id_signin"
+         data-type="standard"
+         data-shape="rectangular"
+         data-theme="outline"
+         data-text="signin_with"
+         data-size="large"
+         data-logo_alignment="left"
+         data-width="320">
+      </div>
+      
+      <div id="g_id_onload"
+         data-client_id="YOUR_GOOGLE_CLIENT_ID"
+         data-context="signin"
+         data-ux_mode="popup"
+         data-callback="handleGoogleLogin"
+         data-auto_prompt="false">
+      </div>
+    </div>
+
+    <div class="login-card" id="login-step-2" style="display: none;">
+      <h2>Complete Profile</h2>
+      <p>Set up your vehicle details to get started.</p>
+      
+      <div class="form-group" style="margin-top: 1.5rem;">
+        <label class="form-label" for="vehicle-input">Vehicle Model</label>
+        <input class="form-control" type="text" id="vehicle-input" placeholder="e.g. Tata Nexon EV">
+      </div>
+      
+      <div class="form-group">
+        <label class="form-label" for="years-input">Years Used: <span id="years-val" style="color:var(--primary);font-weight:700">0</span> yr</label>
+        <input class="form-control" type="range" id="years-input" min="0" max="15" value="0" oninput="document.getElementById('years-val').textContent=this.value; updateDegradation();" style="padding:4px 0">
+      </div>
+      
+      <div class="form-group">
+        <label class="form-label" for="capacity-input">Battery Capacity (kWh)</label>
+        <input class="form-control" type="number" id="capacity-input" placeholder="e.g. 30.2" oninput="updateDegradation()">
+      </div>
+
+      <div class="degradation-result">
+        <div>
+          <span>Estimated Degradation:</span>
+          <strong id="degrad-pct" style="font-size: 1.1rem;">0.0%</strong>
+        </div>
+        <div>
+          <span>Effective Capacity:</span>
+          <strong id="effective-cap" style="font-size: 1.1rem;">0.0 kWh</strong>
+        </div>
+        <div class="degrad-bar-wrap">
+          <div id="degrad-bar" class="degrad-bar"></div>
+        </div>
+        <p class="degrad-note">Based on avg Li-ion degradation rate of 2.3%/year</p>
+      </div>
+
+      <button class="btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;" onclick="saveVehicleSetup()">
+        Save & Continue
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px; margin-left: 8px;"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    function handleGoogleLogin(response) {
+      fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          localStorage.setItem('ev_session_token', data.token);
+          if (!data.user.vehicle_model) {
+            document.getElementById('login-step-1').style.display = 'none';
+            document.getElementById('login-step-2').style.display = 'block';
+          } else {
+            window.location.href = '/';
+          }
+        } else {
+          alert('Login failed: ' + data.message);
+        }
+      })
+      .catch(err => {
+        console.error('Auth error:', err);
+        alert('An error occurred during login.');
+      });
+    }
+
+    function updateDegradation() {
+      const years = parseInt(document.getElementById('years-input').value) || 0;
+      const capacity = parseFloat(document.getElementById('capacity-input').value) || 0;
+      const degradPct = Math.min(years * 2.3, 30).toFixed(1);
+      const effectiveCap = (capacity * (1 - degradPct/100)).toFixed(1);
+      
+      document.getElementById('degrad-pct').textContent = degradPct + '%';
+      document.getElementById('effective-cap').textContent = effectiveCap + ' kWh';
+      
+      const bar = document.getElementById('degrad-bar');
+      bar.style.width = (degradPct / 30) * 100 + '%';
+      bar.style.background = degradPct < 10 ? '#22c55e' : degradPct < 20 ? '#f59e0b' : '#ef4444';
+    }
+
+    function saveVehicleSetup() {
+      const vehicle_model = document.getElementById('vehicle-input').value;
+      const years_used = document.getElementById('years-input').value;
+      const battery_capacity_kwh = document.getElementById('capacity-input').value;
+      
+      if (!vehicle_model || !battery_capacity_kwh) {
+        alert('Please fill in all details');
+        return;
+      }
+
+      const token = localStorage.getItem('ev_session_token');
+      fetch('/api/auth/vehicle', {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-session-token': token
+        },
+        body: JSON.stringify({ vehicle_model, years_used, battery_capacity_kwh })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          window.location.href = '/';
+        } else {
+          alert('Failed to save vehicle details');
+        }
+      });
+    }
+  </script>
+</body>
+</html>
