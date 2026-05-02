@@ -213,7 +213,7 @@ app.post('/api/auth/google', async (req, res) => {
       db.prepare('INSERT INTO google_users (id,google_id,email,name,picture) VALUES (?,?,?,?,?)').run(id, google_id, email, name, picture || null);
       user = db.prepare('SELECT * FROM google_users WHERE id=?').get(id);
     } else {
-      db.prepare('UPDATE google_users SET last_login=datetime("now"),name=?,picture=? WHERE google_id=?').run(name, picture || null, google_id);
+      db.prepare("UPDATE google_users SET last_login=datetime('now'),name=?,picture=? WHERE google_id=?").run(name, picture || null, google_id);
       user = db.prepare('SELECT * FROM google_users WHERE google_id=?').get(google_id);
     }
 
@@ -270,7 +270,7 @@ app.get('/auth/callback', async (req, res) => {
       db.prepare('INSERT INTO google_users (id,google_id,email,name,picture) VALUES (?,?,?,?,?)').run(id, google_id, email, name, picture || null);
       user = db.prepare('SELECT * FROM google_users WHERE id=?').get(id);
     } else {
-      db.prepare('UPDATE google_users SET last_login=datetime("now"),name=?,picture=? WHERE google_id=?').run(name, picture || null, google_id);
+      db.prepare("UPDATE google_users SET last_login=datetime('now'),name=?,picture=? WHERE google_id=?").run(name, picture || null, google_id);
       user = db.prepare('SELECT * FROM google_users WHERE google_id=?').get(google_id);
     }
 
@@ -294,7 +294,7 @@ app.get('/auth/callback', async (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const token = req.headers['x-session-token'];
   if (!token) return res.status(401).json({ success: false, message: 'No token' });
-  const session = db.prepare('SELECT * FROM user_sessions WHERE token=? AND expires_at > datetime("now")').get(token);
+  const session = db.prepare("SELECT * FROM user_sessions WHERE token=? AND expires_at > datetime('now')").get(token);
   if (!session) return res.status(401).json({ success: false, message: 'Session expired' });
   const user = db.prepare('SELECT * FROM google_users WHERE id=?').get(session.user_id);
   res.json({ success: true, user });
@@ -304,7 +304,7 @@ app.get('/api/auth/me', (req, res) => {
 app.patch('/api/auth/vehicle', (req, res) => {
   const token = req.headers['x-session-token'];
   if (!token) return res.status(401).json({ success: false });
-  const session = db.prepare('SELECT * FROM user_sessions WHERE token=? AND expires_at > datetime("now")').get(token);
+  const session = db.prepare("SELECT * FROM user_sessions WHERE token=? AND expires_at > datetime('now')").get(token);
   if (!session) return res.status(401).json({ success: false, message: 'Session expired' });
 
   const { vehicle_model, years_used, battery_capacity_kwh } = req.body;
