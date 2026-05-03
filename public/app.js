@@ -472,7 +472,7 @@ async function confirmBooking(stationId) {
 }
 
 // ── Post-Booking Receipt Modal ─────────────────────────────────
-function showNavModal(station, slotTime, booking) {
+function showNavModal(station, slotTime, booking, txHash) {
   const dt      = new Date(slotTime);
   const timeStr = dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   const dateStr = dt.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -480,22 +480,40 @@ function showNavModal(station, slotTime, booking) {
   const amount    = booking ? `₹${Math.round(booking.amount + 5)}` : '';
   const gmapsUrl  = `https://www.google.com/maps/dir/?api=1&destination=${station.latitude},${station.longitude}&travelmode=driving`;
 
-  document.getElementById('nav-modal-title').textContent = 'Booking Confirmed!';
+  document.getElementById('nav-modal-title').textContent = txHash ? '⛓️ Booking Confirmed on Blockchain!' : 'Booking Confirmed!';
   document.getElementById('nav-modal-sub').textContent = `Booking ID: #${bookingId}`;
   document.getElementById('nav-modal-station').textContent = station.name;
   document.getElementById('nav-modal-addr').textContent = `${dateStr} at ${timeStr}`;
   document.getElementById('nav-modal-gmaps').href = gmapsUrl;
 
-  // Inject receipt detail row
+  // Receipt detail
   let detail = document.getElementById('receipt-detail');
   if (!detail) {
     detail = document.createElement('div');
     detail.id = 'receipt-detail';
-    detail.style.cssText = 'display:flex;justify-content:space-between;margin-top:12px;padding:10px 14px;border-radius:10px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);font-size:.85rem';
+    detail.style.cssText = 'margin-top:12px;padding:12px 14px;border-radius:10px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);font-size:.85rem';
     document.getElementById('nav-modal-card').insertAdjacentElement('afterend', detail);
   }
-  detail.innerHTML = `<span style="color:var(--text2)">Amount Paid</span><span style="font-weight:800;color:var(--success)">${amount}</span>`;
 
+  let receiptHtml = `<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="color:var(--text2)">Amount Paid</span><span style="font-weight:800;color:var(--success)">${amount}</span></div>`;
+
+  if (txHash) {
+    const short = txHash.slice(0, 10) + '...' + txHash.slice(-8);
+    const etherscanUrl = `https://sepolia.etherscan.io/tx/${txHash}`;
+    receiptHtml += `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid rgba(16,185,129,.2)">
+        <span style="color:var(--text2);display:flex;align-items:center;gap:6px">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#F6851B" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+          Tx Hash
+        </span>
+        <a href="${etherscanUrl}" target="_blank" style="color:#F6851B;font-weight:700;font-family:monospace;font-size:.78rem;text-decoration:none" title="${txHash}">${short} ↗</a>
+      </div>
+      <div style="margin-top:6px;font-size:.75rem;color:var(--text3);text-align:center">
+        Verified on Sepolia Blockchain · <a href="${etherscanUrl}" target="_blank" style="color:#F6851B">View on Etherscan</a>
+      </div>`;
+  }
+
+  detail.innerHTML = receiptHtml;
   const modal = document.getElementById('nav-modal');
   modal.classList.add('open');
   modal.setAttribute('aria-hidden', 'false');
@@ -823,13 +841,12 @@ async function processPayment() {
   btn.disabled = true;
   txt.textContent = 'Processing...';
   btn.classList.add('paying');
-  // Simulate 2s payment processing
   await new Promise(r => setTimeout(r, 2000));
   try {
     const { stationId, charger, duration, station, slotTime } = pendingBookingData;
     const res  = await fetch(`${API}/bookings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-session-token': localStorage.getItem('ev_session_token') },
       body: JSON.stringify({ user_id: DEMO_USER, station_id: stationId, slot_time: slotTime, charger_type: charger, duration_hours: duration })
     });
     const data = await res.json();
@@ -841,12 +858,126 @@ async function processPayment() {
     pendingBookingData = null;
     loadStations(userLat, userLng);
     if (selectedStation) openStationDetail(selectedStation.id);
-    showNavModal(station, slotTime, data.booking);
+    showNavModal(station, slotTime, data.booking, null);
   } catch (e) {
     btn.disabled = false;
     btn.classList.remove('paying');
     txt.textContent = 'Pay Now';
     showToast(e.message || 'Payment failed', 'error');
+  }
+}
+
+// ── MetaMask / Blockchain Payment ──────────────────────────────
+// Station operator address (demo Sepolia address — receives test ETH)
+const STATION_WALLET = '0x742d35Cc6634C0532925a3b8D4C9b5C85e5a5Db';
+
+async function payWithMetaMask() {
+  if (!window.ethereum) {
+    showToast('MetaMask not found! Install it at metamask.io', 'error');
+    window.open('https://metamask.io/download/', '_blank');
+    return;
+  }
+  if (!pendingBookingData) return;
+
+  const btn = document.getElementById('metamask-pay-btn');
+  btn.disabled = true;
+  btn.innerHTML = `<span style="display:flex;align-items:center;gap:8px;justify-content:center">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+    Connecting to MetaMask...
+  </span>`;
+
+  try {
+    // 1. Request account access
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send('eth_requestAccounts', []);
+    const signer = await provider.getSigner();
+    const walletAddress = await signer.getAddress();
+
+    // 2. Check we're on Sepolia (chainId 11155111)
+    const network = await provider.getNetwork();
+    if (network.chainId !== 11155111n) {
+      // Ask user to switch to Sepolia
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0xAA36A7' }]  // Sepolia chainId in hex
+        });
+      } catch (switchErr) {
+        // Sepolia not added — add it
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0xAA36A7',
+            chainName: 'Sepolia Testnet',
+            nativeCurrency: { name: 'Sepolia ETH', symbol: 'ETH', decimals: 18 },
+            rpcUrls: ['https://rpc.sepolia.org'],
+            blockExplorerUrls: ['https://sepolia.etherscan.io']
+          }]
+        });
+      }
+    }
+
+    // 3. Convert INR amount to ETH (demo rate: ₹1 = 0.000001 ETH on testnet)
+    const { amount } = pendingBookingData;
+    const totalInr   = amount + 5;
+    const ethAmount  = (totalInr * 0.000001).toFixed(8);
+    const weiAmount  = ethers.parseEther(ethAmount);
+
+    btn.innerHTML = `<span style="display:flex;align-items:center;gap:8px;justify-content:center">
+      <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" width="20" height="20">
+      Confirm in MetaMask wallet...
+    </span>`;
+
+    // 4. Send transaction
+    const tx = await signer.sendTransaction({
+      to: STATION_WALLET,
+      value: weiAmount,
+    });
+
+    btn.innerHTML = `<span style="display:flex;align-items:center;gap:8px;justify-content:center">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><path d="M12 2v4M12 18v4"/></svg>
+      Mining block on Sepolia...
+    </span>`;
+
+    // 5. Wait for 1 confirmation
+    const receipt = await tx.wait(1);
+
+    // 6. Create the booking in our DB with tx hash
+    const { stationId, charger, duration, station, slotTime } = pendingBookingData;
+    const res  = await fetch(`${API}/bookings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-session-token': localStorage.getItem('ev_session_token') },
+      body: JSON.stringify({
+        user_id: DEMO_USER,
+        station_id: stationId,
+        slot_time: slotTime,
+        charger_type: charger,
+        duration_hours: duration,
+        tx_hash: receipt.hash,
+        wallet_address: walletAddress,
+        payment_method: 'metamask'
+      })
+    });
+    const data = await res.json();
+
+    document.getElementById('payment-modal').classList.remove('open');
+    pendingBookingData = null;
+    loadStations(userLat, userLng);
+    if (selectedStation) openStationDetail(selectedStation.id);
+    showNavModal(station, slotTime, data.booking, receipt.hash);
+    showToast('⛓️ Payment confirmed on Sepolia blockchain!', 'success');
+
+  } catch (e) {
+    if (e.code === 4001) {
+      showToast('Transaction rejected by user', 'error');
+    } else {
+      showToast('MetaMask error: ' + (e.shortMessage || e.message || 'Unknown error'), 'error');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `
+      <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" width="26" height="26" alt="MetaMask">
+      Pay with MetaMask <span style="font-size:.8rem;opacity:.85;margin-left:4px">(Sepolia Testnet)</span>`;
   }
 }
 

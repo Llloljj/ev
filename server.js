@@ -55,6 +55,9 @@ db.exec(`
     charger_type TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'confirmed', -- confirmed | cancelled | completed
     amount REAL NOT NULL,
+    payment_method TEXT DEFAULT 'simulated',  -- simulated | metamask
+    tx_hash TEXT,                              -- blockchain tx hash (MetaMask)
+    wallet_address TEXT,                       -- user's wallet address
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (station_id) REFERENCES stations(id),
     FOREIGN KEY (user_id) REFERENCES users(id)
@@ -398,14 +401,14 @@ app.get('/api/stations/:id/slots', (req, res) => {
 
 // POST /api/bookings
 app.post('/api/bookings', (req, res) => {
-  const { user_id, station_id, slot_time, duration_hours = 1, charger_type } = req.body;
+  const { user_id, station_id, slot_time, duration_hours = 1, charger_type,
+          tx_hash, wallet_address, payment_method = 'simulated' } = req.body;
   if (!user_id || !station_id || !slot_time || !charger_type)
     return res.status(400).json({ success: false, message: 'Missing required fields' });
 
   const station = db.prepare('SELECT * FROM stations WHERE id=?').get(station_id);
   if (!station) return res.status(404).json({ success: false, message: 'Station not found' });
 
-  const date = slot_time.split('T')[0];
   const existingBookings = db.prepare(`
     SELECT COUNT(*) as c FROM bookings
     WHERE station_id=? AND slot_time=? AND status='confirmed'
@@ -414,22 +417,24 @@ app.post('/api/bookings', (req, res) => {
   if (existingBookings.c >= station.total_slots)
     return res.status(409).json({ success: false, message: 'Slot fully booked' });
 
-  const amount = station.price_per_kwh * 7.4 * duration_hours; // ~7.4 kWh avg per hour
+  const amount = station.price_per_kwh * 7.4 * duration_hours;
   const booking = {
     id: uuidv4(),
     user_id, station_id, slot_time,
     duration_hours: parseFloat(duration_hours),
     charger_type,
     status: 'confirmed',
-    amount: Math.round(amount * 100) / 100
+    amount: Math.round(amount * 100) / 100,
+    payment_method,
+    tx_hash:        tx_hash || null,
+    wallet_address: wallet_address || null
   };
 
   db.prepare(`
-    INSERT INTO bookings (id,user_id,station_id,slot_time,duration_hours,charger_type,status,amount)
-    VALUES (@id,@user_id,@station_id,@slot_time,@duration_hours,@charger_type,@status,@amount)
+    INSERT INTO bookings (id,user_id,station_id,slot_time,duration_hours,charger_type,status,amount,payment_method,tx_hash,wallet_address)
+    VALUES (@id,@user_id,@station_id,@slot_time,@duration_hours,@charger_type,@status,@amount,@payment_method,@tx_hash,@wallet_address)
   `).run(booking);
 
-  // Update available_slots
   db.prepare('UPDATE stations SET available_slots = MAX(0, available_slots - 1) WHERE id=?').run(station_id);
 
   res.json({ success: true, message: 'Booking confirmed!', booking });

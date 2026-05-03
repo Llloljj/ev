@@ -10,6 +10,9 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- ethers.js — Blockchain / MetaMask -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
+
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 
@@ -417,9 +420,9 @@
   </div>
 </div>
 
-<!-- Payment Simulation Modal -->
+<!-- Payment Modal -->
 <div class="modal-backdrop" id="payment-modal" aria-hidden="true">
-  <div class="modal" style="max-width:420px">
+  <div class="modal" style="max-width:440px">
     <div class="modal-header">
       <div><h3>Secure Payment</h3><p class="modal-subtitle" id="pay-amount-sub"></p></div>
       <button class="modal-close" onclick="closePaymentModal()" aria-label="Close">
@@ -427,12 +430,34 @@
       </button>
     </div>
     <div class="modal-body">
+
+      <!-- MetaMask Blockchain Pay (top, highlighted) -->
+      <button id="metamask-pay-btn" onclick="payWithMetaMask()" style="
+        display:flex;align-items:center;gap:12px;justify-content:center;
+        width:100%;padding:14px 20px;margin-bottom:16px;
+        background:linear-gradient(135deg,#F6851B,#E2761B);
+        color:#fff;border:none;border-radius:12px;font-size:1rem;
+        font-weight:700;cursor:pointer;font-family:inherit;
+        transition:all .2s;box-shadow:0 4px 20px rgba(246,133,27,.35);
+      " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" width="26" height="26" alt="MetaMask">
+        Pay with MetaMask <span style="font-size:.8rem;opacity:.85;margin-left:4px">(Sepolia Testnet)</span>
+      </button>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <div style="flex:1;height:1px;background:var(--border)"></div>
+        <span style="font-size:.75rem;color:var(--text3)">or pay with</span>
+        <div style="flex:1;height:1px;background:var(--border)"></div>
+      </div>
+
+      <!-- Traditional Pay Methods -->
       <div class="pay-methods">
         <div class="pay-method selected" onclick="selectPayMethod(this)"><div class="pay-icon pay-upi">UPI</div><span>GPay</span></div>
         <div class="pay-method" onclick="selectPayMethod(this)"><div class="pay-icon pay-hdfc">H</div><span>HDFC</span></div>
         <div class="pay-method" onclick="selectPayMethod(this)"><div class="pay-icon pay-sbi">S</div><span>SBI</span></div>
         <div class="pay-method" onclick="selectPayMethod(this)"><div class="pay-icon pay-paytm">P</div><span>Paytm</span></div>
       </div>
+
       <div class="pay-summary">
         <div class="price-row"><span>Booking Amount</span><span id="pay-base"></span></div>
         <div class="price-row"><span>Platform Fee</span><span>&#8377;5</span></div>
@@ -442,7 +467,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         <span id="pay-btn-text">Pay Now</span>
       </button>
-      <div class="pay-secure">256-bit SSL encrypted &middot; Secured by VoltPay</div>
+      <div class="pay-secure">256-bit SSL encrypted &middot; Sepolia Blockchain &middot; Secured by VoltPay</div>
     </div>
   </div>
 </div>
