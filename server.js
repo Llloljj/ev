@@ -1,12 +1,18 @@
-const express = require('express');
-const Database = require('better-sqlite3');
-const cors = require('cors');
-const path = require('path');
+const express    = require('express');
+const Database   = require('better-sqlite3');
+const cors       = require('cors');
+const path       = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { OAuth2Client } = require('google-auth-library');
+const Razorpay   = require('razorpay');
+const crypto     = require('crypto');
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '340559256597-kud6141s27hbjh92dr7m10ofkq9cmane.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID     = process.env.GOOGLE_CLIENT_ID || '340559256597-kud6141s27hbjh92dr7m10ofkq9cmane.apps.googleusercontent.com';
+const RAZORPAY_KEY_ID      = process.env.RAZORPAY_KEY_ID     || 'rzp_test_REPLACEME';
+const RAZORPAY_KEY_SECRET  = process.env.RAZORPAY_KEY_SECRET  || 'REPLACEME_SECRET';
+
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+const razorpay = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -438,6 +444,74 @@ app.post('/api/bookings', (req, res) => {
   db.prepare('UPDATE stations SET available_slots = MAX(0, available_slots - 1) WHERE id=?').run(station_id);
 
   res.json({ success: true, message: 'Booking confirmed!', booking });
+});
+
+// ─── Razorpay Payment Routes ───────────────────────────────────────────────────
+
+// POST /api/payment/create-order  — Create Razorpay order before checkout
+app.post('/api/payment/create-order', async (req, res) => {
+  const { amount, station_id, slot_time, charger_type, duration_hours } = req.body;
+  if (!amount || !station_id || !slot_time || !charger_type)
+    return res.status(400).json({ success: false, message: 'Missing fields' });
+  try {
+    const order = await razorpay.orders.create({
+      amount:   Math.round((amount + 5) * 100),  // Razorpay uses paise (₹1 = 100 paise)
+      currency: 'INR',
+      receipt:  `evpath_${uuidv4().slice(0, 8)}`,
+      notes:    { station_id, slot_time, charger_type, duration_hours }
+    });
+    res.json({
+      success:    true,
+      order_id:   order.id,
+      amount:     order.amount,
+      currency:   order.currency,
+      key_id:     RAZORPAY_KEY_ID
+    });
+  } catch (e) {
+    console.error('Razorpay order error:', e);
+    res.status(500).json({ success: false, message: 'Could not create payment order' });
+  }
+});
+
+// POST /api/payment/verify  — Verify Razorpay signature and create booking
+app.post('/api/payment/verify', (req, res) => {
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature,
+          user_id, station_id, slot_time, charger_type, duration_hours } = req.body;
+
+  // 1. Verify HMAC signature
+  const body    = razorpay_order_id + '|' + razorpay_payment_id;
+  const expected = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET).update(body).digest('hex');
+
+  if (expected !== razorpay_signature)
+    return res.status(400).json({ success: false, message: 'Payment verification failed' });
+
+  // 2. Confirm booking in DB
+  const station = db.prepare('SELECT * FROM stations WHERE id=?').get(station_id);
+  if (!station) return res.status(404).json({ success: false, message: 'Station not found' });
+
+  const amount  = station.price_per_kwh * 7.4 * parseFloat(duration_hours || 1);
+  const booking = {
+    id:               uuidv4(),
+    user_id:          user_id || 'user-demo-1',
+    station_id,       slot_time,
+    duration_hours:   parseFloat(duration_hours || 1),
+    charger_type,
+    status:           'confirmed',
+    amount:           Math.round(amount * 100) / 100,
+    payment_method:   'razorpay',
+    tx_hash:          razorpay_payment_id,
+    wallet_address:   null
+  };
+
+  db.prepare(`
+    INSERT INTO bookings (id,user_id,station_id,slot_time,duration_hours,charger_type,status,amount,payment_method,tx_hash,wallet_address)
+    VALUES (@id,@user_id,@station_id,@slot_time,@duration_hours,@charger_type,@status,@amount,@payment_method,@tx_hash,@wallet_address)
+  `).run(booking);
+
+  db.prepare('UPDATE stations SET available_slots = MAX(0, available_slots - 1) WHERE id=?').run(station_id);
+
+  console.log(`✅ Razorpay payment verified: ${razorpay_payment_id}`);
+  res.json({ success: true, booking });
 });
 
 // GET /api/bookings?user_id=

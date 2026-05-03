@@ -13,6 +13,9 @@
   <!-- ethers.js — Blockchain / MetaMask -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
 
+  <!-- Razorpay Checkout -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 
@@ -452,10 +455,19 @@
 
       <!-- Traditional Pay Methods -->
       <div class="pay-methods">
-        <div class="pay-method selected" onclick="selectPayMethod(this)"><div class="pay-icon pay-upi">UPI</div><span>GPay</span></div>
-        <div class="pay-method" onclick="selectPayMethod(this)"><div class="pay-icon pay-hdfc">H</div><span>HDFC</span></div>
-        <div class="pay-method" onclick="selectPayMethod(this)"><div class="pay-icon pay-sbi">S</div><span>SBI</span></div>
-        <div class="pay-method" onclick="selectPayMethod(this)"><div class="pay-icon pay-paytm">P</div><span>Paytm</span></div>
+        <div class="pay-method selected" onclick="selectPayMethod(this)" data-method="razorpay">
+          <div class="pay-icon" style="background:linear-gradient(135deg,#4285F4,#34A853);color:#fff;font-size:11px;font-weight:800">G</div>
+          <span>GPay / UPI</span>
+        </div>
+        <div class="pay-method" onclick="selectPayMethod(this)" data-method="razorpay">
+          <div class="pay-icon pay-hdfc">H</div><span>HDFC</span>
+        </div>
+        <div class="pay-method" onclick="selectPayMethod(this)" data-method="razorpay">
+          <div class="pay-icon pay-sbi">S</div><span>SBI</span>
+        </div>
+        <div class="pay-method" onclick="selectPayMethod(this)" data-method="razorpay">
+          <div class="pay-icon pay-paytm">P</div><span>Paytm</span>
+        </div>
       </div>
 
       <div class="pay-summary">

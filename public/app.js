@@ -836,34 +836,88 @@ function selectPayMethod(el) {
 }
 async function processPayment() {
   if (!pendingBookingData) return;
+
+  const { stationId, charger, duration, station, slotTime, amount } = pendingBookingData;
   const btn = document.getElementById('pay-btn');
   const txt = document.getElementById('pay-btn-text');
   btn.disabled = true;
-  txt.textContent = 'Processing...';
-  btn.classList.add('paying');
-  await new Promise(r => setTimeout(r, 2000));
+  txt.textContent = 'Opening Razorpay...';
+
   try {
-    const { stationId, charger, duration, station, slotTime } = pendingBookingData;
-    const res  = await fetch(`${API}/bookings`, {
-      method: 'POST',
+    // Step 1 — Create Razorpay order on backend
+    const orderRes  = await fetch(`${API}/payment/create-order`, {
+      method:  'POST',
       headers: { 'Content-Type': 'application/json', 'x-session-token': localStorage.getItem('ev_session_token') },
-      body: JSON.stringify({ user_id: DEMO_USER, station_id: stationId, slot_time: slotTime, charger_type: charger, duration_hours: duration })
+      body:    JSON.stringify({ amount, station_id: stationId, slot_time: slotTime, charger_type: charger, duration_hours: duration })
     });
-    const data = await res.json();
-    document.getElementById('payment-modal').classList.remove('open');
-    btn.disabled = false;
-    btn.classList.remove('paying');
-    txt.textContent = 'Pay Now';
-    if (!data.success) throw new Error(data.message);
-    pendingBookingData = null;
-    loadStations(userLat, userLng);
-    if (selectedStation) openStationDetail(selectedStation.id);
-    showNavModal(station, slotTime, data.booking, null);
+    const orderData = await orderRes.json();
+    if (!orderData.success) throw new Error(orderData.message);
+
+    // Step 2 — Open Razorpay Checkout popup
+    await new Promise((resolve, reject) => {
+      const rzp = new Razorpay({
+        key:         orderData.key_id,
+        amount:      orderData.amount,
+        currency:    orderData.currency,
+        order_id:    orderData.order_id,
+        name:        'EV PATH',
+        description: `Charging slot at ${station.name}`,
+        image:       'https://ev-path-awfc.onrender.com/logo.png',
+        prefill: {
+          name:   DEMO_USER_NAME || 'EV User',
+          email:  '',
+          contact: ''
+        },
+        config: {
+          display: {
+            // Show GPay/UPI first
+            preferences: { show_default_blocks: true }
+          }
+        },
+        theme: { color: '#3B82F6' },
+        modal: {
+          ondismiss: () => reject(new Error('Payment cancelled'))
+        },
+        handler: async (response) => {
+          // Step 3 — Verify signature on backend → creates booking
+          try {
+            const verifyRes = await fetch(`${API}/payment/verify`, {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json', 'x-session-token': localStorage.getItem('ev_session_token') },
+              body: JSON.stringify({
+                razorpay_order_id:   response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature:  response.razorpay_signature,
+                user_id:       DEMO_USER,
+                station_id:    stationId,
+                slot_time:     slotTime,
+                charger_type:  charger,
+                duration_hours: duration
+              })
+            });
+            const verifyData = await verifyRes.json();
+            if (!verifyData.success) throw new Error('Verification failed');
+            resolve(verifyData.booking);
+          } catch (e) {
+            reject(e);
+          }
+        }
+      });
+      rzp.open();
+    }).then(booking => {
+      document.getElementById('payment-modal').classList.remove('open');
+      pendingBookingData = null;
+      loadStations(userLat, userLng);
+      if (selectedStation) openStationDetail(selectedStation.id);
+      showNavModal(station, slotTime, booking, null);
+      showToast('✅ Payment successful via Razorpay!', 'success');
+    });
+
   } catch (e) {
-    btn.disabled = false;
-    btn.classList.remove('paying');
-    txt.textContent = 'Pay Now';
     showToast(e.message || 'Payment failed', 'error');
+  } finally {
+    btn.disabled = false;
+    txt.textContent = 'Pay Now';
   }
 }
 
