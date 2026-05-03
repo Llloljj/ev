@@ -1,7 +1,7 @@
 /* ── EV PATH Frontend ── */
 const API = window.location.origin + '/api';
-let DEMO_USER = 'user-demo-1';
-let DEMO_USER_NAME = 'Guest';
+let DEMO_USER = null;
+let DEMO_USER_NAME = null;
 
 let map, userMarker, stationMarkers = [], allStations = [], selectedStation = null, selectedSlot = null;
 let routeLayer = null;
@@ -19,58 +19,74 @@ let isDark = localStorage.getItem('evpath_theme') !== 'light';
 
 // ── Init ───────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
-  // Try to load authenticated user — fall back to demo mode silently
   const token = localStorage.getItem('ev_session_token');
-  if (token) {
-    try {
-      const res = await fetch(`${API}/auth/me`, { headers: { 'x-session-token': token } });
-      const data = await res.json();
-      if (data.success && data.user) {
-        DEMO_USER = data.user.id;
-        DEMO_USER_NAME = data.user.name;
 
-        // Update nav badge with real user info
-        const navBadge = document.querySelector('.user-badge');
-        if (navBadge) {
-          navBadge.style.cursor = 'pointer';
-          navBadge.innerHTML = `
-            ${data.user.picture
-              ? `<img src="${data.user.picture}" style="width:24px;height:24px;border-radius:50%;object-fit:cover">`
-              : `<div style="width:24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${data.user.name.charAt(0).toUpperCase()}</div>`}
-            <span id="user-name-nav">${data.user.name.split(' ')[0]}</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;opacity:.4"><polyline points="6 9 12 15 18 9"/></svg>
-          `;
-          navBadge.onclick = async () => {
-            if (confirm(`Log out of ${data.user.name}?`)) {
-              await fetch(`${API}/auth/logout`, { method: 'POST', headers: { 'x-session-token': token } }).catch(() => {});
-              localStorage.removeItem('ev_session_token');
-              window.location.href = '/login.html';
-            }
-          };
-        }
-
-        // If user logged in but never set up vehicle, pre-populate vehicleProfile from DB
-        if (data.user.vehicle_model && !vehicleProfile) {
-          vehicleProfile = {
-            model: data.user.vehicle_model,
-            yearsUsed: data.user.years_used || 0,
-            batteryCapacity: data.user.battery_capacity_kwh || 0,
-            batteryPct: 80,
-            rangeKm: 300
-          };
-          localStorage.setItem('evpath_vehicle', JSON.stringify(vehicleProfile));
-        }
-      } else {
-        // Invalid token — clear it but DON'T redirect, just use demo mode
-        localStorage.removeItem('ev_session_token');
-      }
-    } catch (e) {
-      // Network/server error — silently continue in demo mode
-      console.warn('Auth check skipped:', e.message);
-    }
+  // No token = must log in
+  if (!token) {
+    window.location.href = '/login.html';
+    return;
   }
 
-  // Always initialize the app regardless of auth state
+  // Validate token with server
+  try {
+    const res  = await fetch(`${API}/auth/me`, { headers: { 'x-session-token': token } });
+    const data = await res.json();
+
+    if (!data.success || !data.user) {
+      // Bad/expired token — clear and send to login
+      localStorage.removeItem('ev_session_token');
+      window.location.href = '/login.html';
+      return;
+    }
+
+    DEMO_USER      = data.user.id;
+    DEMO_USER_NAME = data.user.name;
+
+    // Must have vehicle profile set before entering app
+    if (!data.user.vehicle_model) {
+      window.location.href = '/login.html?step=2&token=' + token;
+      return;
+    }
+
+    // Sync vehicle profile from DB into localStorage
+    vehicleProfile = {
+      model:           data.user.vehicle_model,
+      yearsUsed:       data.user.years_used || 0,
+      batteryCapacity: data.user.battery_capacity_kwh || 0,
+      degradationPct:  data.user.degradation_pct || 0,
+      batteryPct:      parseInt(localStorage.getItem('evpath_battery_pct') || '80'),
+      rangeKm:         parseInt(localStorage.getItem('evpath_range_km')    || '300')
+    };
+    localStorage.setItem('evpath_vehicle', JSON.stringify(vehicleProfile));
+
+    // Update navbar with real user info
+    const navBadge = document.querySelector('.user-badge');
+    if (navBadge) {
+      navBadge.style.cursor = 'pointer';
+      navBadge.innerHTML = `
+        ${data.user.picture
+          ? `<img src="${data.user.picture}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;border:2px solid var(--primary)">`
+          : `<div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--primary),#06B6D4);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800">${data.user.name.charAt(0).toUpperCase()}</div>`}
+        <span id="user-name-nav">${data.user.name.split(' ')[0]}</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;opacity:.4"><polyline points="6 9 12 15 18 9"/></svg>
+      `;
+      navBadge.onclick = async () => {
+        if (confirm(`Log out of ${data.user.name}?`)) {
+          await fetch(`${API}/auth/logout`, { method: 'POST', headers: { 'x-session-token': token } }).catch(() => {});
+          localStorage.removeItem('ev_session_token');
+          window.location.href = '/login.html';
+        }
+      };
+    }
+  } catch (e) {
+    // Server unreachable — clear token and redirect
+    console.error('Auth failed:', e.message);
+    localStorage.removeItem('ev_session_token');
+    window.location.href = '/login.html';
+    return;
+  }
+
+  // ── App boot (only reached if fully authenticated) ──────────
   initMap();
   loadStations();
   checkPage();
@@ -84,6 +100,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     closeStationDetail();
   });
 });
+
 
 function checkPage() {
   const hash = location.hash;
