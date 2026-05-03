@@ -1,7 +1,7 @@
 /* ── EV PATH Frontend ── */
-const API = 'http://localhost:3000/api';
-let DEMO_USER = null;
-let DEMO_USER_NAME = null;
+const API = window.location.origin + '/api';
+let DEMO_USER = 'user-demo-1';
+let DEMO_USER_NAME = 'Guest';
 
 let map, userMarker, stationMarkers = [], allStations = [], selectedStation = null, selectedSlot = null;
 let routeLayer = null;
@@ -19,54 +19,58 @@ let isDark = localStorage.getItem('evpath_theme') !== 'light';
 
 // ── Init ───────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
+  // Try to load authenticated user — fall back to demo mode silently
   const token = localStorage.getItem('ev_session_token');
-  if (!token) {
-    if (window.location.pathname !== '/login.html') {
-      window.location.href = '/login.html';
-      return;
-    }
-  } else {
+  if (token) {
     try {
-      const res = await fetch(`${API}/auth/me`, { headers: { 'x-session-token': token }});
+      const res = await fetch(`${API}/auth/me`, { headers: { 'x-session-token': token } });
       const data = await res.json();
-      if (!data.success) {
+      if (data.success && data.user) {
+        DEMO_USER = data.user.id;
+        DEMO_USER_NAME = data.user.name;
+
+        // Update nav badge with real user info
+        const navBadge = document.querySelector('.user-badge');
+        if (navBadge) {
+          navBadge.style.cursor = 'pointer';
+          navBadge.innerHTML = `
+            ${data.user.picture
+              ? `<img src="${data.user.picture}" style="width:24px;height:24px;border-radius:50%;object-fit:cover">`
+              : `<div style="width:24px;height:24px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${data.user.name.charAt(0).toUpperCase()}</div>`}
+            <span id="user-name-nav">${data.user.name.split(' ')[0]}</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;opacity:.4"><polyline points="6 9 12 15 18 9"/></svg>
+          `;
+          navBadge.onclick = async () => {
+            if (confirm(`Log out of ${data.user.name}?`)) {
+              await fetch(`${API}/auth/logout`, { method: 'POST', headers: { 'x-session-token': token } }).catch(() => {});
+              localStorage.removeItem('ev_session_token');
+              window.location.href = '/login.html';
+            }
+          };
+        }
+
+        // If user logged in but never set up vehicle, pre-populate vehicleProfile from DB
+        if (data.user.vehicle_model && !vehicleProfile) {
+          vehicleProfile = {
+            model: data.user.vehicle_model,
+            yearsUsed: data.user.years_used || 0,
+            batteryCapacity: data.user.battery_capacity_kwh || 0,
+            batteryPct: 80,
+            rangeKm: 300
+          };
+          localStorage.setItem('evpath_vehicle', JSON.stringify(vehicleProfile));
+        }
+      } else {
+        // Invalid token — clear it but DON'T redirect, just use demo mode
         localStorage.removeItem('ev_session_token');
-        if (window.location.pathname !== '/login.html') window.location.href = '/login.html';
-        return;
-      }
-      DEMO_USER = data.user.id;
-      DEMO_USER_NAME = data.user.name;
-      
-      // Handle missing vehicle setup
-      if (!data.user.vehicle_model && window.location.pathname !== '/login.html') {
-        window.location.href = '/login.html';
-        return;
-      }
-      
-      // Update nav with user info
-      const navBadge = document.querySelector('.user-badge');
-      if (navBadge) {
-        navBadge.innerHTML = `
-          ${data.user.picture ? `<img src="${data.user.picture}" style="width:20px;height:20px;border-radius:50%">` : `<div style="width:20px;height:20px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px">${data.user.name.charAt(0)}</div>`}
-          <span id="user-name-nav">${data.user.name}</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;opacity:.5"><polyline points="6 9 12 15 18 9"/></svg>
-        `;
-        // Replace click to user switcher with logout
-        navBadge.onclick = async () => {
-          if (confirm('Are you sure you want to log out?')) {
-            await fetch(`${API}/auth/logout`, { method: 'POST', headers: { 'x-session-token': token }});
-            localStorage.removeItem('ev_session_token');
-            window.location.href = '/login.html';
-          }
-        };
       }
     } catch (e) {
-      console.error('Auth check failed:', e);
+      // Network/server error — silently continue in demo mode
+      console.warn('Auth check skipped:', e.message);
     }
   }
 
-  if (window.location.pathname === '/login.html') return;
-
+  // Always initialize the app regardless of auth state
   initMap();
   loadStations();
   checkPage();
@@ -74,7 +78,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   updateNavUser();
   loadHeroStats();
   initTheme();
-  // ESC closes any open modal or panel
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     document.querySelectorAll('.modal-backdrop.open').forEach(m => m.classList.remove('open'));
