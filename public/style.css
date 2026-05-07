@@ -825,3 +825,197 @@ body.light-mode .leaflet-tile-pane { filter: none; }
   margin-bottom: 0 !important;
   text-align: center;
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   ── Trip Planner ─────────────────────────────────────────────────
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Container */
+.trip-planner {
+  padding: 12px 14px 0;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(59,130,246,.04) 0%, transparent 100%);
+  position: relative;
+}
+
+/* Header label */
+.tp-label {
+  display: flex; align-items: center; gap: 7px;
+  font-size: .72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--primary); margin-bottom: 8px;
+}
+.tp-label svg { width: 13px; height: 13px; }
+
+/* Search input wrapper */
+.tp-search-wrap {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg3); border: 1.5px solid var(--border);
+  border-radius: 12px; padding: 8px 10px;
+  transition: border-color .2s, box-shadow .2s;
+}
+.tp-search-wrap:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(59,130,246,.12);
+}
+.tp-search-wrap > svg { width: 16px; height: 16px; color: var(--primary); flex-shrink: 0; }
+
+.tp-input {
+  flex: 1; background: none; border: none; outline: none;
+  color: var(--text); font-size: .875rem; font-family: var(--font);
+  min-width: 0;
+}
+.tp-input::placeholder { color: var(--text3); }
+
+.tp-clear {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--border); border: none; color: var(--text3);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0; transition: all .2s; padding: 0;
+}
+.tp-clear:hover { background: var(--danger); color: #fff; }
+.tp-clear svg { width: 11px; height: 11px; }
+
+.tp-go-btn {
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  border: none; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all .2s;
+  box-shadow: 0 2px 8px rgba(59,130,246,.35);
+}
+.tp-go-btn:hover { transform: translateX(2px); box-shadow: 0 4px 14px rgba(59,130,246,.5); }
+.tp-go-btn svg { width: 15px; height: 15px; }
+
+/* Suggestions dropdown */
+.tp-suggestions {
+  position: absolute; left: 14px; right: 14px; z-index: 2000;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  animation: slideUp .15s ease;
+  max-height: 260px; overflow-y: auto;
+}
+.tp-suggestion {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; cursor: pointer; transition: background .15s;
+  border-bottom: 1px solid var(--border);
+}
+.tp-suggestion:last-child { border-bottom: none; }
+.tp-suggestion:hover, .tp-suggestion:focus { background: rgba(59,130,246,.1); outline: none; }
+.tp-sug-icon { font-size: 1.1rem; flex-shrink: 0; width: 22px; text-align: center; }
+.tp-sug-text { flex: 1; min-width: 0; }
+.tp-sug-main { font-size: .85rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp-sug-sub  { font-size: .72rem; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Route info chip */
+.tp-route-chip {
+  display: flex; align-items: center; gap: 8px;
+  margin: 8px 0 10px;
+  padding: 8px 12px; border-radius: 10px; font-size: .78rem; font-weight: 500;
+  background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.25);
+  color: var(--primary);
+  animation: slideUp .2s ease;
+}
+.tp-route-chip svg { width: 14px; height: 14px; flex-shrink: 0; }
+.tp-route-chip span { flex: 1; }
+.tp-chip-close {
+  background: none; border: none; color: var(--primary); opacity: .6;
+  font-size: .8rem; cursor: pointer; padding: 0 2px; line-height: 1;
+  flex-shrink: 0;
+}
+.tp-chip-close:hover { opacity: 1; }
+
+/* ── Recommendation card ─────────────────────────────────────── */
+#tp-recommendation { padding: 0 14px 12px; }
+
+.tp-rec-card {
+  background: linear-gradient(135deg, rgba(59,130,246,.1), rgba(6,182,212,.06));
+  border: 1px solid rgba(59,130,246,.3);
+  border-radius: 14px; padding: 14px;
+  animation: slideUp .25s ease;
+}
+
+/* Warning variant */
+.tp-rec-card.tp-rec-warn {
+  background: rgba(245,158,11,.08);
+  border-color: rgba(245,158,11,.3);
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.tp-rec-card.tp-rec-warn svg { width: 20px; height: 20px; color: var(--warning); flex-shrink: 0; margin-top: 2px; }
+.tp-rec-action {
+  margin-left: auto; flex-shrink: 0;
+  padding: 6px 12px; border-radius: 8px; font-size: .75rem; font-weight: 700;
+  background: var(--primary); color: #fff; border: none; cursor: pointer; transition: all .2s;
+}
+.tp-rec-action:hover { background: var(--primary-dark); }
+
+/* Card header */
+.tp-rec-header {
+  display: flex; align-items: center; gap: 7px;
+  font-size: .72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .07em; color: var(--primary); margin-bottom: 10px;
+}
+.tp-rec-header svg { width: 13px; height: 13px; }
+.tp-rec-badge {
+  margin-left: auto; padding: 2px 8px; border-radius: 99px;
+  font-size: .68rem; font-weight: 700; text-transform: none; letter-spacing: 0;
+}
+
+/* Station name & address */
+.tp-rec-name {
+  font-size: .95rem; font-weight: 800; color: var(--text);
+  margin-bottom: 3px; line-height: 1.3;
+}
+.tp-rec-addr {
+  font-size: .75rem; color: var(--text2); margin-bottom: 12px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+
+/* Stats row */
+.tp-rec-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 8px; margin-bottom: 12px;
+}
+.tp-rec-stat {
+  background: rgba(0,0,0,.2); border-radius: 8px;
+  padding: 8px 6px; text-align: center;
+}
+.tp-rec-stat-val {
+  font-size: .9rem; font-weight: 800; color: var(--primary); line-height: 1;
+}
+.tp-rec-stat-lbl {
+  font-size: .62rem; color: var(--text3); margin-top: 3px;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+
+/* Why explanation */
+.tp-rec-why {
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: .73rem; color: var(--text2); margin-bottom: 12px;
+  padding: 8px 10px; border-radius: 8px;
+  background: rgba(0,0,0,.15); line-height: 1.5;
+}
+.tp-rec-why svg { width: 13px; height: 13px; flex-shrink: 0; margin-top: 1px; color: var(--primary); }
+
+/* Action buttons */
+.tp-rec-actions {
+  display: flex; gap: 8px;
+}
+
+/* Recommended station card pulse highlight */
+@keyframes recommendedPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(59,130,246,.6); border-color: var(--primary); }
+  50%  { box-shadow: 0 0 0 8px rgba(59,130,246,0); border-color: var(--primary); }
+  100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); border-color: var(--border); }
+}
+.station-card.tp-recommended {
+  animation: recommendedPulse 1s ease 3;
+  border-color: var(--primary) !important;
+  background: rgba(59,130,246,.12) !important;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .tp-rec-stats { grid-template-columns: repeat(2, 1fr); }
+  .tp-rec-actions { flex-direction: column; }
+}

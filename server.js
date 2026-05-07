@@ -1,581 +1,357 @@
-const express    = require('express');
-const Database   = require('better-sqlite3');
-const cors       = require('cors');
-const path       = require('path');
+require('dotenv').config();
+const express   = require('express');
+const cors      = require('cors');
+const path      = require('path');
 const { v4: uuidv4 } = require('uuid');
-const { OAuth2Client } = require('google-auth-library');
-const Razorpay   = require('razorpay');
-const crypto     = require('crypto');
+const { createClient } = require('@supabase/supabase-js');
+const Razorpay  = require('razorpay');
+const crypto    = require('crypto');
 
-const GOOGLE_CLIENT_ID     = process.env.GOOGLE_CLIENT_ID || '340559256597-kud6141s27hbjh92dr7m10ofkq9cmane.apps.googleusercontent.com';
-const RAZORPAY_KEY_ID      = process.env.RAZORPAY_KEY_ID     || 'rzp_test_REPLACEME';
-const RAZORPAY_KEY_SECRET  = process.env.RAZORPAY_KEY_SECRET  || 'REPLACEME_SECRET';
+// ─── Config ────────────────────────────────────────────────────────────────────
+const SUPABASE_URL        = process.env.SUPABASE_URL        || 'https://vzurdecvrepjjgiyruwy.supabase.co';
+const SUPABASE_ANON_KEY   = process.env.SUPABASE_ANON_KEY   || 'sb_publishable_wZG3ysd1_D5W_KHqxKrxxw_ZMrweJTi';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const RAZORPAY_KEY_ID     = process.env.RAZORPAY_KEY_ID     || 'rzp_test_REPLACEME';
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || 'REPLACEME_SECRET';
 
-const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
-const razorpay = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
+// Admin client — bypasses RLS, server-side only
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY);
 
-const app = express();
+let razorpay = null;
+try {
+  if (RAZORPAY_KEY_ID && RAZORPAY_KEY_ID !== 'rzp_test_REPLACEME') {
+    razorpay = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
+  } else {
+    console.warn('⚠️ Razorpay keys missing. Payment simulation will bypass real Razorpay order creation.');
+  }
+} catch(e) {
+  console.warn('⚠️ Razorpay initialization failed:', e.message);
+}
+
+const app  = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── Database Setup ────────────────────────────────────────────────────────────
-const db = new Database(path.join(__dirname, 'evcharging.db'));
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS stations (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    address TEXT NOT NULL,
-    latitude REAL NOT NULL,
-    longitude REAL NOT NULL,
-    charger_types TEXT NOT NULL,        -- JSON array: ["CCS","CHAdeMO","Type2"]
-    total_slots INTEGER NOT NULL,
-    available_slots INTEGER NOT NULL,
-    price_per_kwh REAL NOT NULL,
-    avg_wait_minutes INTEGER NOT NULL,
-    amenities TEXT NOT NULL,            -- JSON array: ["Restroom","WiFi","Cafe"]
-    rating REAL NOT NULL,
-    operator TEXT NOT NULL,
-    power_kw REAL NOT NULL,
-    is_fast_charger INTEGER NOT NULL DEFAULT 0
-  );
-
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    phone TEXT,
-    vehicle_model TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS bookings (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    station_id TEXT NOT NULL,
-    slot_time TEXT NOT NULL,
-    duration_hours REAL NOT NULL DEFAULT 1,
-    charger_type TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'confirmed', -- confirmed | cancelled | completed
-    amount REAL NOT NULL,
-    payment_method TEXT DEFAULT 'simulated',  -- simulated | metamask
-    tx_hash TEXT,                              -- blockchain tx hash (MetaMask)
-    wallet_address TEXT,                       -- user's wallet address
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (station_id) REFERENCES stations(id),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS google_users (
-    id TEXT PRIMARY KEY,
-    google_id TEXT UNIQUE NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    name TEXT NOT NULL,
-    picture TEXT,
-    vehicle_model TEXT,
-    years_used INTEGER DEFAULT 0,
-    battery_capacity_kwh REAL,
-    degradation_pct REAL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    last_login TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS user_sessions (
-    token TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES google_users(id)
-  );
-`);
-
-// ─── Seed Demo Data ────────────────────────────────────────────────────────────
-const seedStations = () => {
-  const count = db.prepare('SELECT COUNT(*) as c FROM stations').get();
-  if (count.c > 0) return;
-
-  const stations = [
-    {
-      id: uuidv4(), name: 'EV PATH Hub - Connaught Place', address: 'Connaught Place, New Delhi, 110001',
-      latitude: 28.6315, longitude: 77.2167, charger_types: JSON.stringify(['CCS2', 'Type2', 'CHAdeMO']),
-      total_slots: 8, available_slots: 5, price_per_kwh: 12.5, avg_wait_minutes: 10,
-      amenities: JSON.stringify(['Restroom', 'WiFi', 'Cafe', 'Parking']), rating: 4.7,
-      operator: 'Tata Power EV', power_kw: 150, is_fast_charger: 1
-    },
-    {
-      id: uuidv4(), name: 'GreenCharge - Bandra West', address: 'Linking Road, Bandra West, Mumbai 400050',
-      latitude: 19.0596, longitude: 72.8295, charger_types: JSON.stringify(['CCS2', 'Type2']),
-      total_slots: 6, available_slots: 2, price_per_kwh: 14.0, avg_wait_minutes: 25,
-      amenities: JSON.stringify(['Restroom', 'Shopping Mall']), rating: 4.2,
-      operator: 'BPCL EV', power_kw: 60, is_fast_charger: 0
-    },
-    {
-      id: uuidv4(), name: 'SpeedCharge - Koramangala', address: '5th Block, Koramangala, Bengaluru 560095',
-      latitude: 12.9352, longitude: 77.6245, charger_types: JSON.stringify(['CCS2', 'CHAdeMO']),
-      total_slots: 10, available_slots: 8, price_per_kwh: 11.0, avg_wait_minutes: 5,
-      amenities: JSON.stringify(['Restroom', 'WiFi', 'Snacks', 'Lounge']), rating: 4.9,
-      operator: 'Ather Grid', power_kw: 180, is_fast_charger: 1
-    },
-    {
-      id: uuidv4(), name: 'EcoStation - Anna Nagar', address: 'Anna Nagar, Chennai 600040',
-      latitude: 13.0878, longitude: 80.2100, charger_types: JSON.stringify(['Type2', 'CCS2']),
-      total_slots: 5, available_slots: 3, price_per_kwh: 10.5, avg_wait_minutes: 15,
-      amenities: JSON.stringify(['Restroom', 'Parking']), rating: 4.0,
-      operator: 'TANGEDCO EV', power_kw: 50, is_fast_charger: 0
-    },
-    {
-      id: uuidv4(), name: 'MetroCharge - Salt Lake City', address: 'Sector V, Salt Lake City, Kolkata 700091',
-      latitude: 22.5726, longitude: 88.4320, charger_types: JSON.stringify(['CCS2', 'Type2']),
-      total_slots: 7, available_slots: 0, price_per_kwh: 9.5, avg_wait_minutes: 45,
-      amenities: JSON.stringify(['Restroom', 'Food Court']), rating: 3.8,
-      operator: 'CESC EV', power_kw: 60, is_fast_charger: 0
-    },
-    {
-      id: uuidv4(), name: 'TurboVolt - Cyber City', address: 'DLF Cyber City, Gurugram 122002',
-      latitude: 28.4947, longitude: 77.0880, charger_types: JSON.stringify(['CCS2', 'CHAdeMO', 'Type2', 'GB/T']),
-      total_slots: 12, available_slots: 9, price_per_kwh: 13.0, avg_wait_minutes: 5,
-      amenities: JSON.stringify(['Restroom', 'WiFi', 'Cafe', 'Gym', 'Concierge']), rating: 4.8,
-      operator: 'MG Motors EV Hub', power_kw: 240, is_fast_charger: 1
-    },
-    {
-      id: uuidv4(), name: 'NexCharge - Wakad', address: 'Wakad, Pune 411057',
-      latitude: 18.5980, longitude: 73.7598, charger_types: JSON.stringify(['CCS2', 'Type2']),
-      total_slots: 4, available_slots: 4, price_per_kwh: 10.0, avg_wait_minutes: 0,
-      amenities: JSON.stringify(['Parking', 'WiFi']), rating: 4.5,
-      operator: 'Charge Zone', power_kw: 100, is_fast_charger: 1
-    },
-    {
-      id: uuidv4(), name: 'ZapPoint - Jubilee Hills', address: 'Jubilee Hills Road No. 36, Hyderabad 500033',
-      latitude: 17.4322, longitude: 78.4075, charger_types: JSON.stringify(['CCS2', 'Type2']),
-      total_slots: 6, available_slots: 1, price_per_kwh: 11.5, avg_wait_minutes: 30,
-      amenities: JSON.stringify(['Restroom', 'Shopping']), rating: 4.1,
-      operator: 'TSREDCO EV', power_kw: 60, is_fast_charger: 0
-    },
-    {
-      id: uuidv4(), name: 'FlashCharge - Viman Nagar', address: 'Viman Nagar, Pune 411014',
-      latitude: 18.5679, longitude: 73.9143, charger_types: JSON.stringify(['CHAdeMO', 'CCS2', 'Type2']),
-      total_slots: 8, available_slots: 6, price_per_kwh: 12.0, avg_wait_minutes: 8,
-      amenities: JSON.stringify(['Restroom', 'WiFi', 'Lounge', 'EV Helpdesk']), rating: 4.6,
-      operator: 'Tata Power EV', power_kw: 150, is_fast_charger: 1
-    },
-    {
-      id: uuidv4(), name: 'CleanEnergy Hub - Whitefield', address: 'ITPL Road, Whitefield, Bengaluru 560066',
-      latitude: 12.9783, longitude: 77.7408, charger_types: JSON.stringify(['CCS2', 'Type2']),
-      total_slots: 15, available_slots: 11, price_per_kwh: 11.5, avg_wait_minutes: 5,
-      amenities: JSON.stringify(['Restroom', 'WiFi', 'Food Court', 'Parking', 'Security']), rating: 4.7,
-      operator: 'Ather Grid', power_kw: 200, is_fast_charger: 1
-    }
-  ];
-
-  const insert = db.prepare(`
-    INSERT INTO stations (id,name,address,latitude,longitude,charger_types,total_slots,
-      available_slots,price_per_kwh,avg_wait_minutes,amenities,rating,operator,power_kw,is_fast_charger)
-    VALUES (@id,@name,@address,@latitude,@longitude,@charger_types,@total_slots,
-      @available_slots,@price_per_kwh,@avg_wait_minutes,@amenities,@rating,@operator,@power_kw,@is_fast_charger)
-  `);
-  stations.forEach(s => insert.run(s));
-  console.log(`✅ Seeded ${stations.length} EV charging stations`);
-};
-
-const seedUsers = () => {
-  const count = db.prepare('SELECT COUNT(*) as c FROM users').get();
-  if (count.c > 0) return;
-  const insert = db.prepare(`INSERT INTO users (id,name,email,phone,vehicle_model) VALUES (?,?,?,?,?)`);
-  insert.run('user-demo-1', 'Arjun Sharma', 'arjun@evdemo.in', '9876543210', 'Tata Nexon EV');
-  insert.run('user-demo-2', 'Priya Patel', 'priya@evdemo.in', '9123456789', 'MG ZS EV');
-  console.log('✅ Seeded demo users');
-};
-
-seedStations();
-seedUsers();
-
 // ─── Haversine Distance (km) ───────────────────────────────────────────────────
 function haversine(lat1, lon1, lat2, lon2) {
-  const R = 6371;
+  const R    = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 +
+  const a    = Math.sin(dLat / 2) ** 2 +
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// ─── Auth Middleware ───────────────────────────────────────────────────────────
+// Verifies Supabase JWT from x-session-token header
+async function requireAuth(req, res, next) {
+  const token = req.headers['x-session-token'] || (req.headers['authorization'] || '').replace('Bearer ', '');
+  if (!token) return res.status(401).json({ success: false, message: 'No token' });
+
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return res.status(401).json({ success: false, message: 'Invalid or expired session' });
+
+  req.user  = user;
+  req.token = token;
+  next();
+}
+
 // ─── Auth Routes ───────────────────────────────────────────────────────────────
 
-// POST /api/auth/google — Verify Google ID token, upsert user, create session
-app.post('/api/auth/google', async (req, res) => {
-  const { credential } = req.body;
-  if (!credential) return res.status(400).json({ success: false, message: 'No credential provided' });
-  try {
-    const ticket = await googleClient.verifyIdToken({
-      idToken: credential,
-      audience: GOOGLE_CLIENT_ID || undefined,
-    });
-    const payload = ticket.getPayload();
-    const { sub: google_id, email, name, picture } = payload;
-
-    let user = db.prepare('SELECT * FROM google_users WHERE google_id=?').get(google_id);
-    if (!user) {
-      const id = uuidv4();
-      db.prepare('INSERT INTO google_users (id,google_id,email,name,picture) VALUES (?,?,?,?,?)').run(id, google_id, email, name, picture || null);
-      user = db.prepare('SELECT * FROM google_users WHERE id=?').get(id);
-    } else {
-      db.prepare("UPDATE google_users SET last_login=datetime('now'),name=?,picture=? WHERE google_id=?").run(name, picture || null, google_id);
-      user = db.prepare('SELECT * FROM google_users WHERE google_id=?').get(google_id);
-    }
-
-    const token = uuidv4();
-    const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare('INSERT INTO user_sessions (token,user_id,expires_at) VALUES (?,?,?)').run(token, user.id, expires);
-
-    console.log(`✅ Google login: ${email}`);
-    res.json({ success: true, token, user });
-  } catch (e) {
-    console.error('Google auth error:', e.message);
-    res.status(401).json({ success: false, message: 'Invalid Google token: ' + e.message });
-  }
-});
-
-// GET /auth/callback — OAuth2 redirect callback (exchanges code for user info)
-app.get('/auth/callback', async (req, res) => {
-  const { code, error } = req.query;
-  if (error || !code) {
-    return res.redirect('/login.html?error=' + encodeURIComponent(error || 'no_code'));
-  }
-
-  const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
-  const redirectUri = (process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + PORT) + '/auth/callback';
-
-  try {
-    // Exchange code for tokens
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        code,
-        client_id: GOOGLE_CLIENT_ID,
-        client_secret: GOOGLE_CLIENT_SECRET,
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code'
-      })
-    });
-    const tokenData = await tokenRes.json();
-    if (!tokenData.id_token) throw new Error('No id_token: ' + JSON.stringify(tokenData));
-
-    // Verify the id_token
-    const ticket = await googleClient.verifyIdToken({
-      idToken: tokenData.id_token,
-      audience: GOOGLE_CLIENT_ID
-    });
-    const payload = ticket.getPayload();
-    const { sub: google_id, email, name, picture } = payload;
-
-    // Upsert user
-    let user = db.prepare('SELECT * FROM google_users WHERE google_id=?').get(google_id);
-    if (!user) {
-      const id = uuidv4();
-      db.prepare('INSERT INTO google_users (id,google_id,email,name,picture) VALUES (?,?,?,?,?)').run(id, google_id, email, name, picture || null);
-      user = db.prepare('SELECT * FROM google_users WHERE id=?').get(id);
-    } else {
-      db.prepare("UPDATE google_users SET last_login=datetime('now'),name=?,picture=? WHERE google_id=?").run(name, picture || null, google_id);
-      user = db.prepare('SELECT * FROM google_users WHERE google_id=?').get(google_id);
-    }
-
-    // Create session
-    const sessionToken = uuidv4();
-    const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare('INSERT INTO user_sessions (token,user_id,expires_at) VALUES (?,?,?)').run(sessionToken, user.id, expires);
-
-    console.log(`✅ Google OAuth callback: ${email}`);
-
-    // Redirect to login page with token; JS will store it and route appropriately
-    const needsVehicle = !user.vehicle_model;
-    res.redirect(`/login.html?token=${sessionToken}&step=${needsVehicle ? 2 : 'done'}`);
-  } catch (e) {
-    console.error('OAuth callback error:', e.message);
-    res.redirect('/login.html?error=' + encodeURIComponent('Auth failed: ' + e.message));
-  }
-});
-
-// GET /api/auth/me — Get current user by session token
-app.get('/api/auth/me', (req, res) => {
-  const token = req.headers['x-session-token'];
+// GET /api/auth/me — validate session token, return user + profile
+app.get('/api/auth/me', async (req, res) => {
+  const token = req.headers['x-session-token'] || (req.headers['authorization'] || '').replace('Bearer ', '');
   if (!token) return res.status(401).json({ success: false, message: 'No token' });
-  const session = db.prepare("SELECT * FROM user_sessions WHERE token=? AND expires_at > datetime('now')").get(token);
-  if (!session) return res.status(401).json({ success: false, message: 'Session expired' });
-  const user = db.prepare('SELECT * FROM google_users WHERE id=?').get(session.user_id);
-  res.json({ success: true, user });
+
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return res.status(401).json({ success: false, message: 'Session expired' });
+
+  const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+  res.json({ success: true, user: { ...user, ...(profile || {}) } });
 });
 
-// PATCH /api/auth/vehicle — Save vehicle model + degradation calc
-app.patch('/api/auth/vehicle', (req, res) => {
-  const token = req.headers['x-session-token'];
-  if (!token) return res.status(401).json({ success: false });
-  const session = db.prepare("SELECT * FROM user_sessions WHERE token=? AND expires_at > datetime('now')").get(token);
-  if (!session) return res.status(401).json({ success: false, message: 'Session expired' });
-
+// PATCH /api/auth/vehicle — save vehicle info + calculate degradation
+app.patch('/api/auth/vehicle', requireAuth, async (req, res) => {
   const { vehicle_model, years_used, battery_capacity_kwh } = req.body;
-  // Industry avg Li-ion degradation: ~2.3% per year, capped at 30%
-  const degradation_pct = Math.min((parseInt(years_used) || 0) * 2.3, 30);
+  const degradation_pct  = Math.min((parseInt(years_used) || 0) * 2.3, 30);
   const effective_capacity = (parseFloat(battery_capacity_kwh) || 0) * (1 - degradation_pct / 100);
 
-  db.prepare('UPDATE google_users SET vehicle_model=?,years_used=?,battery_capacity_kwh=?,degradation_pct=? WHERE id=?')
-    .run(vehicle_model || null, parseInt(years_used) || 0, parseFloat(battery_capacity_kwh) || null, degradation_pct, session.user_id);
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .update({
+      vehicle_model:        vehicle_model || null,
+      years_used:           parseInt(years_used) || 0,
+      battery_capacity_kwh: parseFloat(battery_capacity_kwh) || null,
+      degradation_pct
+    })
+    .eq('id', req.user.id)
+    .select()
+    .single();
 
-  const user = db.prepare('SELECT * FROM google_users WHERE id=?').get(session.user_id);
-  res.json({ success: true, user, degradation_pct, effective_capacity: Math.round(effective_capacity * 10) / 10 });
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true, user: profile, degradation_pct, effective_capacity: Math.round(effective_capacity * 10) / 10 });
 });
 
-// POST /api/auth/logout
-app.post('/api/auth/logout', (req, res) => {
-  const token = req.headers['x-session-token'];
-  if (token) db.prepare('DELETE FROM user_sessions WHERE token=?').run(token);
-  res.json({ success: true });
-});
+// POST /api/auth/logout — Supabase handles invalidation client-side
+app.post('/api/auth/logout', (req, res) => res.json({ success: true }));
 
-// ─── API Routes ────────────────────────────────────────────────────────────────
+// ─── Station Routes ────────────────────────────────────────────────────────────
 
 // GET /api/stations?lat=&lng=&radius=&charger_type=&fast_only=&available_only=
-app.get('/api/stations', (req, res) => {
+app.get('/api/stations', async (req, res) => {
   const { lat, lng, radius = 50, charger_type, fast_only, available_only } = req.query;
-  let stations = db.prepare('SELECT * FROM stations').all();
 
-  stations = stations.map(s => ({
+  const { data: stations, error } = await supabase.from('stations').select('*');
+  if (error) return res.status(500).json({ success: false, message: error.message });
+
+  let result = stations.map(s => ({
     ...s,
-    charger_types: JSON.parse(s.charger_types),
-    amenities: JSON.parse(s.amenities),
-    is_fast_charger: s.is_fast_charger === 1,
     distance: lat && lng ? haversine(parseFloat(lat), parseFloat(lng), s.latitude, s.longitude) : null
   }));
 
   if (lat && lng) {
-    stations = stations.filter(s => s.distance <= parseFloat(radius));
-    stations.sort((a, b) => a.distance - b.distance);
+    result = result.filter(s => s.distance <= parseFloat(radius));
+    result.sort((a, b) => a.distance - b.distance);
   }
 
-  if (charger_type) stations = stations.filter(s => s.charger_types.includes(charger_type));
-  if (fast_only === 'true') stations = stations.filter(s => s.is_fast_charger);
-  if (available_only === 'true') stations = stations.filter(s => s.available_slots > 0);
+  if (charger_type)           result = result.filter(s => s.charger_types.includes(charger_type));
+  if (fast_only === 'true')   result = result.filter(s => s.is_fast_charger);
+  if (available_only === 'true') result = result.filter(s => s.available_slots > 0);
 
-  res.json({ success: true, count: stations.length, stations });
+  res.json({ success: true, count: result.length, stations: result });
 });
 
 // GET /api/stations/:id
-app.get('/api/stations/:id', (req, res) => {
-  const s = db.prepare('SELECT * FROM stations WHERE id=?').get(req.params.id);
-  if (!s) return res.status(404).json({ success: false, message: 'Station not found' });
-  res.json({
-    success: true,
-    station: {
-      ...s,
-      charger_types: JSON.parse(s.charger_types),
-      amenities: JSON.parse(s.amenities),
-      is_fast_charger: s.is_fast_charger === 1
-    }
-  });
+app.get('/api/stations/:id', async (req, res) => {
+  const { data: station, error } = await supabase
+    .from('stations').select('*').eq('id', req.params.id).single();
+  if (error || !station) return res.status(404).json({ success: false, message: 'Station not found' });
+  res.json({ success: true, station });
 });
 
 // GET /api/stations/:id/slots?date=
-app.get('/api/stations/:id/slots', (req, res) => {
+app.get('/api/stations/:id/slots', async (req, res) => {
   const { date } = req.query;
   const targetDate = date || new Date().toISOString().split('T')[0];
-  const station = db.prepare('SELECT * FROM stations WHERE id=?').get(req.params.id);
-  if (!station) return res.status(404).json({ success: false, message: 'Station not found' });
 
-  const bookedSlots = db.prepare(`
-    SELECT slot_time FROM bookings
-    WHERE station_id=? AND date(slot_time)=? AND status='confirmed'
-  `).all(req.params.id, targetDate).map(r => r.slot_time);
+  const { data: station, error: sErr } = await supabase
+    .from('stations').select('*').eq('id', req.params.id).single();
+  if (sErr || !station) return res.status(404).json({ success: false, message: 'Station not found' });
 
-  // Generate hourly slots 06:00 - 22:00
+  const { data: bookedRows } = await supabase
+    .from('bookings')
+    .select('slot_time')
+    .eq('station_id', req.params.id)
+    .eq('status', 'confirmed')
+    .like('slot_time', `${targetDate}%`);
+
+  const bookedSlots = (bookedRows || []).map(r => r.slot_time);
+
   const slots = [];
   for (let h = 6; h <= 22; h++) {
     const timeStr = `${targetDate}T${String(h).padStart(2, '0')}:00:00`;
-    const booked = bookedSlots.filter(s => s.startsWith(timeStr)).length;
+    const booked  = bookedSlots.filter(s => s.startsWith(timeStr)).length;
     slots.push({
-      time: timeStr,
-      display: `${String(h).padStart(2, '0')}:00`,
+      time:     timeStr,
+      display:  `${String(h).padStart(2, '0')}:00`,
       available: Math.max(0, station.total_slots - booked),
-      total: station.total_slots,
-      is_peak: (h >= 8 && h <= 10) || (h >= 17 && h <= 20)
+      total:     station.total_slots,
+      is_peak:  (h >= 8 && h <= 10) || (h >= 17 && h <= 20)
     });
   }
   res.json({ success: true, date: targetDate, slots });
 });
 
+// ─── Booking Routes ────────────────────────────────────────────────────────────
+
 // POST /api/bookings
-app.post('/api/bookings', (req, res) => {
-  const { user_id, station_id, slot_time, duration_hours = 1, charger_type,
-          tx_hash, wallet_address, payment_method = 'simulated' } = req.body;
+app.post('/api/bookings', async (req, res) => {
+  const { user_id, station_id, slot_time, duration_hours = 1,
+          charger_type, tx_hash, wallet_address, payment_method = 'simulated' } = req.body;
+
   if (!user_id || !station_id || !slot_time || !charger_type)
     return res.status(400).json({ success: false, message: 'Missing required fields' });
 
-  const station = db.prepare('SELECT * FROM stations WHERE id=?').get(station_id);
+  const { data: station } = await supabase.from('stations').select('*').eq('id', station_id).single();
   if (!station) return res.status(404).json({ success: false, message: 'Station not found' });
 
-  const existingBookings = db.prepare(`
-    SELECT COUNT(*) as c FROM bookings
-    WHERE station_id=? AND slot_time=? AND status='confirmed'
-  `).get(station_id, slot_time);
+  const { count } = await supabase
+    .from('bookings')
+    .select('*', { count: 'exact', head: true })
+    .eq('station_id', station_id)
+    .eq('slot_time', slot_time)
+    .eq('status', 'confirmed');
 
-  if (existingBookings.c >= station.total_slots)
+  if (count >= station.total_slots)
     return res.status(409).json({ success: false, message: 'Slot fully booked' });
 
-  const amount = station.price_per_kwh * 7.4 * duration_hours;
+  const amount  = station.price_per_kwh * 7.4 * parseFloat(duration_hours);
   const booking = {
     id: uuidv4(),
     user_id, station_id, slot_time,
-    duration_hours: parseFloat(duration_hours),
+    duration_hours:  parseFloat(duration_hours),
     charger_type,
-    status: 'confirmed',
-    amount: Math.round(amount * 100) / 100,
+    status:          'confirmed',
+    amount:          Math.round(amount * 100) / 100,
     payment_method,
-    tx_hash:        tx_hash || null,
-    wallet_address: wallet_address || null
+    tx_hash:         tx_hash || null,
+    wallet_address:  wallet_address || null
   };
 
-  db.prepare(`
-    INSERT INTO bookings (id,user_id,station_id,slot_time,duration_hours,charger_type,status,amount,payment_method,tx_hash,wallet_address)
-    VALUES (@id,@user_id,@station_id,@slot_time,@duration_hours,@charger_type,@status,@amount,@payment_method,@tx_hash,@wallet_address)
-  `).run(booking);
+  const { error: bErr } = await supabase.from('bookings').insert(booking);
+  if (bErr) return res.status(500).json({ success: false, message: bErr.message });
 
-  db.prepare('UPDATE stations SET available_slots = MAX(0, available_slots - 1) WHERE id=?').run(station_id);
+  await supabase.from('stations')
+    .update({ available_slots: Math.max(0, station.available_slots - 1) })
+    .eq('id', station_id);
 
   res.json({ success: true, message: 'Booking confirmed!', booking });
 });
 
-// ─── Razorpay Payment Routes ───────────────────────────────────────────────────
+// GET /api/bookings?user_id=
+app.get('/api/bookings', async (req, res) => {
+  const { user_id } = req.query;
+  let query = supabase
+    .from('bookings')
+    .select('*, stations(name, address, latitude, longitude)')
+    .order('created_at', { ascending: false });
 
-// POST /api/payment/create-order  — Create Razorpay order before checkout
+  if (user_id) query = query.eq('user_id', user_id);
+
+  const { data: bookings, error } = await query;
+  if (error) return res.status(500).json({ success: false, message: error.message });
+
+  const result = (bookings || []).map(b => ({
+    ...b,
+    station_name: b.stations?.name,
+    address:      b.stations?.address,
+    latitude:     b.stations?.latitude,
+    longitude:    b.stations?.longitude,
+    stations:     undefined
+  }));
+
+  res.json({ success: true, bookings: result });
+});
+
+// PATCH /api/bookings/:id/cancel
+app.patch('/api/bookings/:id/cancel', async (req, res) => {
+  const { data: booking } = await supabase.from('bookings').select('*').eq('id', req.params.id).single();
+  if (!booking)                    return res.status(404).json({ success: false, message: 'Booking not found' });
+  if (booking.status === 'cancelled') return res.status(400).json({ success: false, message: 'Already cancelled' });
+
+  await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', req.params.id);
+
+  const { data: station } = await supabase.from('stations').select('*').eq('id', booking.station_id).single();
+  if (station) {
+    await supabase.from('stations')
+      .update({ available_slots: Math.min(station.total_slots, station.available_slots + 1) })
+      .eq('id', booking.station_id);
+  }
+
+  res.json({ success: true, message: 'Booking cancelled successfully' });
+});
+
+// ─── Razorpay Routes ───────────────────────────────────────────────────────────
+
+// POST /api/payment/create-order
 app.post('/api/payment/create-order', async (req, res) => {
   const { amount, station_id, slot_time, charger_type, duration_hours } = req.body;
   if (!amount || !station_id || !slot_time || !charger_type)
     return res.status(400).json({ success: false, message: 'Missing fields' });
   try {
+    if (!razorpay) {
+      // Simulate an order id for dev if razorpay is missing
+      return res.json({ success: true, order_id: `sim_order_${uuidv4().slice(0, 8)}`, amount: Math.round((amount + 5) * 100), currency: 'INR', key_id: 'sim_key' });
+    }
     const order = await razorpay.orders.create({
-      amount:   Math.round((amount + 5) * 100),  // Razorpay uses paise (₹1 = 100 paise)
+      amount:   Math.round((amount + 5) * 100),
       currency: 'INR',
       receipt:  `evpath_${uuidv4().slice(0, 8)}`,
       notes:    { station_id, slot_time, charger_type, duration_hours }
     });
-    res.json({
-      success:    true,
-      order_id:   order.id,
-      amount:     order.amount,
-      currency:   order.currency,
-      key_id:     RAZORPAY_KEY_ID
-    });
+    res.json({ success: true, order_id: order.id, amount: order.amount, currency: order.currency, key_id: RAZORPAY_KEY_ID });
   } catch (e) {
     console.error('Razorpay order error:', e);
     res.status(500).json({ success: false, message: 'Could not create payment order' });
   }
 });
 
-// POST /api/payment/verify  — Verify Razorpay signature and create booking
-app.post('/api/payment/verify', (req, res) => {
+// POST /api/payment/verify
+app.post('/api/payment/verify', async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature,
           user_id, station_id, slot_time, charger_type, duration_hours } = req.body;
 
-  // 1. Verify HMAC signature
-  const body    = razorpay_order_id + '|' + razorpay_payment_id;
-  const expected = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET).update(body).digest('hex');
+  if (razorpay) {
+    const body     = razorpay_order_id + '|' + razorpay_payment_id;
+    const expected = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET).update(body).digest('hex');
+    if (expected !== razorpay_signature)
+      return res.status(400).json({ success: false, message: 'Payment verification failed' });
+  } else {
+    // Simulated payment verification
+    console.log('⚠️ Simulating payment verification since Razorpay keys are missing');
+  }
 
-  if (expected !== razorpay_signature)
-    return res.status(400).json({ success: false, message: 'Payment verification failed' });
-
-  // 2. Confirm booking in DB
-  const station = db.prepare('SELECT * FROM stations WHERE id=?').get(station_id);
+  const { data: station } = await supabase.from('stations').select('*').eq('id', station_id).single();
   if (!station) return res.status(404).json({ success: false, message: 'Station not found' });
 
   const amount  = station.price_per_kwh * 7.4 * parseFloat(duration_hours || 1);
   const booking = {
-    id:               uuidv4(),
-    user_id:          user_id || 'user-demo-1',
-    station_id,       slot_time,
-    duration_hours:   parseFloat(duration_hours || 1),
+    id: uuidv4(), user_id: user_id || null,
+    station_id, slot_time,
+    duration_hours:  parseFloat(duration_hours || 1),
     charger_type,
-    status:           'confirmed',
-    amount:           Math.round(amount * 100) / 100,
-    payment_method:   'razorpay',
-    tx_hash:          razorpay_payment_id,
-    wallet_address:   null
+    status:          'confirmed',
+    amount:          Math.round(amount * 100) / 100,
+    payment_method:  'razorpay',
+    tx_hash:         razorpay_payment_id,
+    wallet_address:  null
   };
 
-  db.prepare(`
-    INSERT INTO bookings (id,user_id,station_id,slot_time,duration_hours,charger_type,status,amount,payment_method,tx_hash,wallet_address)
-    VALUES (@id,@user_id,@station_id,@slot_time,@duration_hours,@charger_type,@status,@amount,@payment_method,@tx_hash,@wallet_address)
-  `).run(booking);
-
-  db.prepare('UPDATE stations SET available_slots = MAX(0, available_slots - 1) WHERE id=?').run(station_id);
+  await supabase.from('bookings').insert(booking);
+  await supabase.from('stations')
+    .update({ available_slots: Math.max(0, station.available_slots - 1) })
+    .eq('id', station_id);
 
   console.log(`✅ Razorpay payment verified: ${razorpay_payment_id}`);
   res.json({ success: true, booking });
 });
 
-// GET /api/bookings?user_id=
-app.get('/api/bookings', (req, res) => {
-  const { user_id } = req.query;
-  const query = user_id
-    ? `SELECT b.*, s.name as station_name, s.address, s.latitude, s.longitude
-       FROM bookings b JOIN stations s ON b.station_id = s.id
-       WHERE b.user_id=? ORDER BY b.created_at DESC`
-    : `SELECT b.*, s.name as station_name FROM bookings b JOIN stations s ON b.station_id=s.id ORDER BY b.created_at DESC`;
+// ─── Stats Route ───────────────────────────────────────────────────────────────
+app.get('/api/stats', async (req, res) => {
+  const { count: totalStations } = await supabase.from('stations').select('*', { count: 'exact', head: true });
+  const { data: slotData }       = await supabase.from('stations').select('total_slots, available_slots');
+  const totalSlots     = (slotData || []).reduce((s, r) => s + r.total_slots, 0);
+  const availableSlots = (slotData || []).reduce((s, r) => s + r.available_slots, 0);
 
-  const bookings = user_id
-    ? db.prepare(query).all(user_id)
-    : db.prepare(query).all();
-
-  res.json({ success: true, bookings });
-});
-
-// PATCH /api/bookings/:id/cancel
-app.patch('/api/bookings/:id/cancel', (req, res) => {
-  const booking = db.prepare('SELECT * FROM bookings WHERE id=?').get(req.params.id);
-  if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-  if (booking.status === 'cancelled') return res.status(400).json({ success: false, message: 'Already cancelled' });
-
-  db.prepare("UPDATE bookings SET status='cancelled' WHERE id=?").run(req.params.id);
-  db.prepare('UPDATE stations SET available_slots = MIN(total_slots, available_slots + 1) WHERE id=?').run(booking.station_id);
-
-  res.json({ success: true, message: 'Booking cancelled successfully' });
-});
-
-// GET /api/users/:id
-app.get('/api/users/:id', (req, res) => {
-  const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
-  if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-  res.json({ success: true, user });
-});
-
-// GET /api/stats - admin dashboard stats
-app.get('/api/stats', (req, res) => {
-  const totalStations = db.prepare('SELECT COUNT(*) as c FROM stations').get().c;
-  const totalSlots = db.prepare('SELECT SUM(total_slots) as s FROM stations').get().s;
-  const availableSlots = db.prepare('SELECT SUM(available_slots) as s FROM stations').get().s;
-  const totalBookings = db.prepare("SELECT COUNT(*) as c FROM bookings WHERE status='confirmed'").get().c;
-  const revenue = db.prepare("SELECT SUM(amount) as s FROM bookings WHERE status='confirmed'").get().s || 0;
-  const popularStation = db.prepare(`
-    SELECT s.name, COUNT(b.id) as cnt
-    FROM bookings b JOIN stations s ON b.station_id=s.id
-    WHERE b.status='confirmed'
-    GROUP BY b.station_id ORDER BY cnt DESC LIMIT 1
-  `).get();
+  const { count: totalBookings } = await supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('status', 'confirmed');
+  const { data: revenueData }    = await supabase.from('bookings').select('amount').eq('status', 'confirmed');
+  const revenue = (revenueData || []).reduce((s, b) => s + b.amount, 0);
 
   res.json({
     success: true,
     stats: {
       totalStations, totalSlots, availableSlots,
-      occupancyRate: Math.round(((totalSlots - availableSlots) / totalSlots) * 100),
+      occupancyRate: totalSlots ? Math.round(((totalSlots - availableSlots) / totalSlots) * 100) : 0,
       totalBookings,
-      revenue: Math.round(revenue),
-      popularStation: popularStation ? popularStation.name : 'N/A'
+      revenue:        Math.round(revenue),
+      popularStation: 'N/A'
     }
   });
 });
 
-// Fallback to index.html
+// ─── Config endpoint for frontend ─────────────────────────────────────────────
+// Safely exposes only the public anon key to the browser
+app.get('/api/config', (req, res) => {
+  res.json({
+    supabaseUrl:    SUPABASE_URL,
+    supabaseAnonKey: SUPABASE_ANON_KEY
+  });
+});
+
+// ─── Fallback ──────────────────────────────────────────────────────────────────
 app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -583,5 +359,6 @@ app.get('/{*path}', (req, res) => {
 app.listen(PORT, () => {
   console.log(`\n⚡ EV PATH Charging Platform`);
   console.log(`🌐 Running at http://localhost:${PORT}`);
-  console.log(`📊 Admin panel at http://localhost:${PORT}/admin.html\n`);
+  console.log(`📊 Admin panel at http://localhost:${PORT}/admin.html`);
+  console.log(`🗄  Database: Supabase (${SUPABASE_URL})\n`);
 });

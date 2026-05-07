@@ -17,76 +17,51 @@ let currentSort = 'default';
 // ── Theme ──────────────────────────────────────────────────────
 let isDark = localStorage.getItem('evpath_theme') !== 'light';
 
-// ── Init ───────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', async () => {
-  const token = localStorage.getItem('ev_session_token');
-
-  // No token = must log in
-  if (!token) {
+// ── Init (Supabase Auth Check) ──
+window.addEventListener('DOMContentLoaded', () => {
+  const sessionUser = JSON.parse(localStorage.getItem('ev_user'));
+  if (!sessionUser) {
     window.location.href = '/login.html';
     return;
   }
 
-  // Validate token with server
-  try {
-    const res  = await fetch(`${API}/auth/me`, { headers: { 'x-session-token': token } });
-    const data = await res.json();
+  DEMO_USER      = sessionUser.id;
+  DEMO_USER_NAME = sessionUser.user_metadata?.full_name || sessionUser.email.split('@')[0];
 
-    if (!data.success || !data.user) {
-      // Bad/expired token — clear and send to login
-      localStorage.removeItem('ev_session_token');
-      window.location.href = '/login.html';
-      return;
-    }
-
-    DEMO_USER      = data.user.id;
-    DEMO_USER_NAME = data.user.name;
-
-    // Must have vehicle profile set before entering app
-    if (!data.user.vehicle_model) {
-      window.location.href = '/login.html?step=2&token=' + token;
-      return;
-    }
-
-    // Sync vehicle profile from DB into localStorage
+  // Default vehicle profile if none saved
+  if (!vehicleProfile) {
     vehicleProfile = {
-      model:           data.user.vehicle_model,
-      yearsUsed:       data.user.years_used || 0,
-      batteryCapacity: data.user.battery_capacity_kwh || 0,
-      degradationPct:  data.user.degradation_pct || 0,
-      batteryPct:      parseInt(localStorage.getItem('evpath_battery_pct') || '80'),
-      rangeKm:         parseInt(localStorage.getItem('evpath_range_km')    || '300')
+      model:      'Tata Nexon EV',
+      yearsUsed:  1,
+      rangeKm:    312,
+      batteryPct: 80,
+      degradationPct: 2.3
     };
     localStorage.setItem('evpath_vehicle', JSON.stringify(vehicleProfile));
-
-    // Update navbar with real user info
-    const navBadge = document.querySelector('.user-badge');
-    if (navBadge) {
-      navBadge.style.cursor = 'pointer';
-      navBadge.innerHTML = `
-        ${data.user.picture
-          ? `<img src="${data.user.picture}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;border:2px solid var(--primary)">`
-          : `<div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--primary),#06B6D4);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800">${data.user.name.charAt(0).toUpperCase()}</div>`}
-        <span id="user-name-nav">${data.user.name.split(' ')[0]}</span>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;opacity:.4"><polyline points="6 9 12 15 18 9"/></svg>
-      `;
-      navBadge.onclick = async () => {
-        if (confirm(`Log out of ${data.user.name}?`)) {
-          await fetch(`${API}/auth/logout`, { method: 'POST', headers: { 'x-session-token': token } }).catch(() => {});
-          localStorage.removeItem('ev_session_token');
-          window.location.href = '/login.html';
-        }
-      };
-    }
-  } catch (e) {
-    // Server unreachable — clear token and redirect
-    console.error('Auth failed:', e.message);
-    localStorage.removeItem('ev_session_token');
-    window.location.href = '/login.html';
-    return;
   }
 
-  // ── App boot (only reached if fully authenticated) ──────────
+  // Update navbar user badge
+  const navBadge = document.querySelector('.user-badge');
+  if (navBadge) {
+    const avatar = sessionUser.user_metadata?.avatar_url;
+    const initial = DEMO_USER_NAME.charAt(0).toUpperCase();
+    
+    if (avatar) {
+      navBadge.innerHTML = `
+        <img src="${avatar}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;">
+        <span id="user-name-nav">${DEMO_USER_NAME}</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;opacity:.4"><polyline points="6 9 12 15 18 9"/></svg>
+      `;
+    } else {
+      navBadge.innerHTML = `
+        <div style="width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--primary),#06B6D4);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800">${initial}</div>
+        <span id="user-name-nav">${DEMO_USER_NAME}</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;opacity:.4"><polyline points="6 9 12 15 18 9"/></svg>
+      `;
+    }
+  }
+
+  // ── Boot app ────────────────────────────────────────────────
   initMap();
   loadStations();
   checkPage();
@@ -480,7 +455,7 @@ function showNavModal(station, slotTime, booking, txHash) {
   const amount    = booking ? `₹${Math.round(booking.amount + 5)}` : '';
   const gmapsUrl  = `https://www.google.com/maps/dir/?api=1&destination=${station.latitude},${station.longitude}&travelmode=driving`;
 
-  document.getElementById('nav-modal-title').textContent = txHash ? '⛓️ Booking Confirmed on Blockchain!' : 'Booking Confirmed!';
+  document.getElementById('nav-modal-title').textContent = 'Booking Confirmed!';
   document.getElementById('nav-modal-sub').textContent = `Booking ID: #${bookingId}`;
   document.getElementById('nav-modal-station').textContent = station.name;
   document.getElementById('nav-modal-addr').textContent = `${dateStr} at ${timeStr}`;
@@ -786,30 +761,29 @@ function showAIInsight() {
   document.getElementById('station-list').insertAdjacentElement('beforebegin', banner);
 }
 
-// ── User Switcher ──────────────────────────────────────────────
-function openUserSwitcher() {
-  // Mark active user
-  ['user-demo-1','user-demo-2'].forEach(id => {
-    const check = document.getElementById('check-' + id);
-    const card  = document.getElementById('ucard-' + id);
-    if (check) check.style.display = id === DEMO_USER ? 'flex' : 'none';
-    if (card)  card.classList.toggle('upc-active', id === DEMO_USER);
-  });
-  const modal = document.getElementById('user-switcher-modal');
+// ── User Profile Modal ──────────────────────────────────────────────
+function openUserProfile() {
+  const modal = document.getElementById('user-profile-modal');
   modal.classList.add('open');
 }
-function closeUserSwitcher(e) {
-  if (e.target.id === 'user-switcher-modal') document.getElementById('user-switcher-modal').classList.remove('open');
+
+function closeUserProfile(e) {
+  if (e.target.id === 'user-profile-modal') document.getElementById('user-profile-modal').classList.remove('open');
 }
-function switchUser(userId, name, vehicle) {
-  DEMO_USER      = userId;
-  DEMO_USER_NAME = name;
-  localStorage.setItem('evpath_user', userId);
-  localStorage.setItem('evpath_user_name', name);
-  document.getElementById('user-switcher-modal').classList.remove('open');
-  updateNavUser();
-  showToast(`Switched to ${name} (${vehicle})`, 'success');
-  if (document.getElementById('page-bookings').classList.contains('active')) loadBookings();
+
+async function logoutUser() {
+  localStorage.removeItem('ev_session_token');
+  localStorage.removeItem('ev_user');
+  localStorage.removeItem('evpath_vehicle');
+  
+  // Clear Supabase's internal tokens so it doesn't auto-login again
+  Object.keys(localStorage).forEach(key => {
+    if (key.startsWith('sb-')) {
+      localStorage.removeItem(key);
+    }
+  });
+  
+  window.location.href = '/login.html';
 }
 function updateNavUser() {
   const el = document.getElementById('user-name-nav');
@@ -921,119 +895,6 @@ async function processPayment() {
   }
 }
 
-// ── MetaMask / Blockchain Payment ──────────────────────────────
-// Station operator address (demo Sepolia address — receives test ETH)
-const STATION_WALLET = '0x742d35Cc6634C0532925a3b8D4C9b5C85e5a5Db';
-
-async function payWithMetaMask() {
-  if (!window.ethereum) {
-    showToast('MetaMask not found! Install it at metamask.io', 'error');
-    window.open('https://metamask.io/download/', '_blank');
-    return;
-  }
-  if (!pendingBookingData) return;
-
-  const btn = document.getElementById('metamask-pay-btn');
-  btn.disabled = true;
-  btn.innerHTML = `<span style="display:flex;align-items:center;gap:8px;justify-content:center">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-    Connecting to MetaMask...
-  </span>`;
-
-  try {
-    // 1. Request account access
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send('eth_requestAccounts', []);
-    const signer = await provider.getSigner();
-    const walletAddress = await signer.getAddress();
-
-    // 2. Check we're on Sepolia (chainId 11155111)
-    const network = await provider.getNetwork();
-    if (network.chainId !== 11155111n) {
-      // Ask user to switch to Sepolia
-      try {
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0xAA36A7' }]  // Sepolia chainId in hex
-        });
-      } catch (switchErr) {
-        // Sepolia not added — add it
-        await window.ethereum.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: '0xAA36A7',
-            chainName: 'Sepolia Testnet',
-            nativeCurrency: { name: 'Sepolia ETH', symbol: 'ETH', decimals: 18 },
-            rpcUrls: ['https://rpc.sepolia.org'],
-            blockExplorerUrls: ['https://sepolia.etherscan.io']
-          }]
-        });
-      }
-    }
-
-    // 3. Convert INR amount to ETH (demo rate: ₹1 = 0.000001 ETH on testnet)
-    const { amount } = pendingBookingData;
-    const totalInr   = amount + 5;
-    const ethAmount  = (totalInr * 0.000001).toFixed(8);
-    const weiAmount  = ethers.parseEther(ethAmount);
-
-    btn.innerHTML = `<span style="display:flex;align-items:center;gap:8px;justify-content:center">
-      <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" width="20" height="20">
-      Confirm in MetaMask wallet...
-    </span>`;
-
-    // 4. Send transaction
-    const tx = await signer.sendTransaction({
-      to: STATION_WALLET,
-      value: weiAmount,
-    });
-
-    btn.innerHTML = `<span style="display:flex;align-items:center;gap:8px;justify-content:center">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><path d="M12 2v4M12 18v4"/></svg>
-      Mining block on Sepolia...
-    </span>`;
-
-    // 5. Wait for 1 confirmation
-    const receipt = await tx.wait(1);
-
-    // 6. Create the booking in our DB with tx hash
-    const { stationId, charger, duration, station, slotTime } = pendingBookingData;
-    const res  = await fetch(`${API}/bookings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-session-token': localStorage.getItem('ev_session_token') },
-      body: JSON.stringify({
-        user_id: DEMO_USER,
-        station_id: stationId,
-        slot_time: slotTime,
-        charger_type: charger,
-        duration_hours: duration,
-        tx_hash: receipt.hash,
-        wallet_address: walletAddress,
-        payment_method: 'metamask'
-      })
-    });
-    const data = await res.json();
-
-    document.getElementById('payment-modal').classList.remove('open');
-    pendingBookingData = null;
-    loadStations(userLat, userLng);
-    if (selectedStation) openStationDetail(selectedStation.id);
-    showNavModal(station, slotTime, data.booking, receipt.hash);
-    showToast('⛓️ Payment confirmed on Sepolia blockchain!', 'success');
-
-  } catch (e) {
-    if (e.code === 4001) {
-      showToast('Transaction rejected by user', 'error');
-    } else {
-      showToast('MetaMask error: ' + (e.shortMessage || e.message || 'Unknown error'), 'error');
-    }
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = `
-      <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" width="26" height="26" alt="MetaMask">
-      Pay with MetaMask <span style="font-size:.8rem;opacity:.85;margin-left:4px">(Sepolia Testnet)</span>`;
-  }
-}
 
 // ── Dark / Light Theme ─────────────────────────────────────────
 function initTheme() {
@@ -1118,3 +979,346 @@ function calcEstimate() {
 function closeEstimatorModal() {
   document.getElementById('estimator-modal').classList.remove('open');
 }
+
+// ══════════════════════════════════════════════════════════════════
+// ── Trip Planner ─────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════
+let tripDestLat  = null;
+let tripDestLng  = null;
+let tripDestName = '';
+let tripRouteLayer   = null;
+let tripDestMarker   = null;
+let nominatimTimer   = null;
+let suggestionsData  = [];
+
+// ── 1. Input change → debounced Nominatim search ─────────────────
+function onTripInputChange(val) {
+  const clearBtn = document.getElementById('tp-clear');
+  clearBtn.style.display = val.length > 0 ? 'flex' : 'none';
+
+  clearTimeout(nominatimTimer);
+  if (val.length < 3) {
+    hideSuggestions();
+    return;
+  }
+  nominatimTimer = setTimeout(() => fetchNominatimSuggestions(val), 400);
+}
+
+async function fetchNominatimSuggestions(query) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=6&countrycodes=in&addressdetails=1`;
+    const res  = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const data = await res.json();
+    suggestionsData = data;
+    renderSuggestions(data);
+  } catch {
+    hideSuggestions();
+  }
+}
+
+function renderSuggestions(results) {
+  const box = document.getElementById('tp-suggestions');
+  if (!results.length) { hideSuggestions(); return; }
+  box.innerHTML = results.map((r, i) => {
+    const icon = r.type === 'fuel' || (r.display_name||'').toLowerCase().includes('charge') ? '⚡' :
+                 r.class === 'highway' ? '🛣️' :
+                 r.class === 'railway' ? '🚉' :
+                 r.class === 'aeroway' ? '✈️' : '📍';
+    const parts = r.display_name.split(',');
+    const main  = parts[0].trim();
+    const sub   = parts.slice(1, 3).join(',').trim();
+    return `<div class="tp-suggestion" onclick="selectSuggestion(${i})" tabindex="0">
+      <span class="tp-sug-icon">${icon}</span>
+      <div class="tp-sug-text">
+        <div class="tp-sug-main">${main}</div>
+        <div class="tp-sug-sub">${sub}</div>
+      </div>
+    </div>`;
+  }).join('');
+  box.style.display = 'block';
+}
+
+function hideSuggestions() {
+  document.getElementById('tp-suggestions').style.display = 'none';
+}
+
+function selectSuggestion(idx) {
+  const r = suggestionsData[idx];
+  tripDestLat  = parseFloat(r.lat);
+  tripDestLng  = parseFloat(r.lon);
+  tripDestName = r.display_name.split(',')[0].trim();
+  document.getElementById('tp-input').value = tripDestName;
+  document.getElementById('tp-clear').style.display = 'flex';
+  hideSuggestions();
+}
+
+// ── 2. Keyboard nav in suggestions ───────────────────────────────
+function onTripInputKeydown(e) {
+  if (e.key === 'Enter') { confirmTripDestination(); return; }
+  if (e.key === 'Escape') { hideSuggestions(); return; }
+  const items = document.querySelectorAll('.tp-suggestion');
+  if (!items.length) return;
+  // arrow nav
+  if (e.key === 'ArrowDown') { e.preventDefault(); items[0].focus(); }
+}
+
+// ── 3. Confirm — draw route + recommend station ───────────────────
+async function confirmTripDestination() {
+  hideSuggestions();
+  const inputVal = document.getElementById('tp-input').value.trim();
+
+  // If no suggestion was selected, geocode the raw text first
+  if (!tripDestLat || !tripDestName || tripDestName !== inputVal) {
+    if (!inputVal) { showToast('Enter a destination first', 'error'); return; }
+    showToast('Searching for destination…', 'info');
+    try {
+      const res  = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(inputVal)}&format=json&limit=1&countrycodes=in`, { headers: { 'Accept-Language': 'en' } });
+      const data = await res.json();
+      if (!data.length) { showToast('Destination not found. Try being more specific.', 'error'); return; }
+      tripDestLat  = parseFloat(data[0].lat);
+      tripDestLng  = parseFloat(data[0].lon);
+      tripDestName = data[0].display_name.split(',')[0].trim();
+      document.getElementById('tp-input').value = tripDestName;
+    } catch {
+      showToast('Could not geocode destination', 'error');
+      return;
+    }
+  }
+
+  if (!userLat || !userLng) {
+    showToast('Getting your location first…', 'info');
+    navigator.geolocation.getCurrentPosition(pos => {
+      userLat = pos.coords.latitude;
+      userLng = pos.coords.longitude;
+      if (userMarker) userMarker.remove();
+      userMarker = L.circleMarker([userLat, userLng], {
+        radius: 10, fillColor: '#3B82F6', color: '#fff', weight: 3, fillOpacity: 1
+      }).addTo(map).bindPopup('<b>You are here</b>');
+      drawTripRoute();
+    }, () => showToast('Location access denied. Enable GPS to plan routes.', 'error'));
+    return;
+  }
+
+  drawTripRoute();
+}
+
+// ── 4. Draw blue route via OSRM + place destination pin ──────────
+async function drawTripRoute() {
+  // Clean previous trip
+  if (tripRouteLayer)  { tripRouteLayer.remove();  tripRouteLayer = null; }
+  if (tripDestMarker)  { tripDestMarker.remove();  tripDestMarker = null; }
+
+  // Destination pin
+  const destIcon = L.divIcon({
+    html: `<div style="
+      background:#EF4444;width:36px;height:36px;border-radius:50% 50% 50% 0;
+      transform:rotate(-45deg);display:flex;align-items:center;justify-content:center;
+      box-shadow:0 4px 16px rgba(239,68,68,.6);border:2px solid rgba(255,255,255,.4)">
+      <svg style="transform:rotate(45deg);width:16px;height:16px;color:#fff"
+        viewBox="0 0 24 24" fill="currentColor"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3" fill="#fff"/></svg>
+    </div>`,
+    className: '', iconSize: [36, 36], iconAnchor: [18, 36], popupAnchor: [0, -40]
+  });
+  tripDestMarker = L.marker([tripDestLat, tripDestLng], { icon: destIcon })
+    .addTo(map)
+    .bindPopup(`<div class="popup-content"><h4>🏁 ${tripDestName}</h4><div class="popup-avail" style="color:var(--text2)">Destination</div></div>`);
+
+  document.getElementById('tp-route-chip').style.display = 'flex';
+  document.getElementById('tp-route-info').textContent = 'Calculating route…';
+
+  try {
+    const url  = `https://router.project-osrm.org/route/v1/driving/${userLng},${userLat};${tripDestLng},${tripDestLat}?overview=full&geometries=geojson`;
+    const res  = await fetch(url);
+    const data = await res.json();
+
+    if (data.code !== 'Ok' || !data.routes[0]) throw new Error('No route');
+
+    const geojson = data.routes[0].geometry;
+    const distKm  = (data.routes[0].distance / 1000).toFixed(1);
+    const durMin  = Math.round(data.routes[0].duration / 60);
+    const durStr  = durMin >= 60
+      ? `${Math.floor(durMin/60)}h ${durMin%60}m`
+      : `${durMin} min`;
+
+    // Draw thick blue road route
+    tripRouteLayer = L.geoJSON(geojson, {
+      style: {
+        color: '#3B82F6', weight: 5, opacity: 0.9,
+        dashArray: '12 6', lineCap: 'round', lineJoin: 'round'
+      }
+    }).addTo(map);
+
+    // Fit map to show full route
+    const bounds = L.latLngBounds([[userLat, userLng], [tripDestLat, tripDestLng]]);
+    map.fitBounds(bounds, { padding: [60, 60] });
+
+    // Update chip
+    document.getElementById('tp-route-info').textContent =
+      `📍 ${distKm} km  ·  ⏱ ${durStr}  →  ${tripDestName}`;
+
+    // 5. Recommend best station
+    recommendStationForTrip(parseFloat(distKm));
+
+  } catch {
+    document.getElementById('tp-route-info').textContent = 'Route unavailable — straight-line shown';
+    // Fallback: straight line
+    tripRouteLayer = L.polyline([[userLat, userLng], [tripDestLat, tripDestLng]], {
+      color: '#3B82F6', weight: 4, opacity: 0.7, dashArray: '10 8'
+    }).addTo(map);
+    map.fitBounds([[userLat, userLng], [tripDestLat, tripDestLng]], { padding: [60, 60] });
+    recommendStationForTrip(null);
+  }
+}
+
+// ── 5. Recommendation engine ──────────────────────────────────────
+function recommendStationForTrip(routeDistKm) {
+  const rec = document.getElementById('tp-recommendation');
+
+  if (!vehicleProfile || !vehicleProfile.batteryPct || !vehicleProfile.rangeKm) {
+    rec.style.display = 'block';
+    rec.innerHTML = `<div class="tp-rec-card tp-rec-warn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div>
+        <div class="tp-rec-title">Set your vehicle profile first</div>
+        <div class="tp-rec-sub">We need your battery % and range to recommend a charging stop.</div>
+      </div>
+      <button class="tp-rec-action" onclick="openVehicleProfile()">Set Vehicle</button>
+    </div>`;
+    return;
+  }
+
+  const battPct   = vehicleProfile.batteryPct  || 80;
+  const rangeKm   = vehicleProfile.rangeKm     || 300;
+  const actualKm  = (battPct / 100) * rangeKm;          // real remaining range
+  const safeRadius = actualKm * 0.50;                    // 50% of remaining = safe stop zone
+
+  // Filter stations within safeRadius from user, with available slots
+  const candidates = allStations
+    .filter(s => {
+      if (!userLat || !userLng) return true;
+      const d = haversineJS(userLat, userLng, s.latitude, s.longitude);
+      s._tripDist = d;
+      return d <= safeRadius && s.available_slots > 0;
+    })
+    .sort((a, b) => {
+      // prefer fast chargers, then closest, then best rating
+      if (b.is_fast_charger !== a.is_fast_charger) return b.is_fast_charger - a.is_fast_charger;
+      return a._tripDist - b._tripDist;
+    });
+
+  if (!candidates.length) {
+    // No stations in safe range — show warning
+    rec.style.display = 'block';
+    rec.innerHTML = `<div class="tp-rec-card tp-rec-warn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <div>
+        <div class="tp-rec-title">⚠️ No station in safe range!</div>
+        <div class="tp-rec-sub">Your battery (${battPct}%) gives ~${Math.round(actualKm)} km. Safe stop zone: ${Math.round(safeRadius)} km — no available stations found.</div>
+      </div>
+    </div>`;
+    return;
+  }
+
+  const best   = candidates[0];
+  const dist   = best._tripDist.toFixed(1);
+  const badgeColor = best.is_fast_charger ? 'var(--accent)' : 'var(--success)';
+  const badgeLabel = best.is_fast_charger ? '⚡ Fast Charger' : '🔌 AC Charger';
+  const reason = best._tripDist < safeRadius * 0.4
+    ? 'Nearest station with available slots'
+    : 'Best option within your safe range';
+
+  rec.style.display = 'block';
+  rec.innerHTML = `
+    <div class="tp-rec-card">
+      <div class="tp-rec-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        <span>Recommended Charging Stop</span>
+        <span class="tp-rec-badge" style="background:rgba(255,255,255,.1);color:${badgeColor}">${badgeLabel}</span>
+      </div>
+      <div class="tp-rec-name">${best.name}</div>
+      <div class="tp-rec-addr">${best.address}</div>
+      <div class="tp-rec-stats">
+        <div class="tp-rec-stat">
+          <div class="tp-rec-stat-val">${dist} km</div>
+          <div class="tp-rec-stat-lbl">From you</div>
+        </div>
+        <div class="tp-rec-stat">
+          <div class="tp-rec-stat-val">${best.available_slots}/${best.total_slots}</div>
+          <div class="tp-rec-stat-lbl">Slots free</div>
+        </div>
+        <div class="tp-rec-stat">
+          <div class="tp-rec-stat-val">${best.power_kw}kW</div>
+          <div class="tp-rec-stat-lbl">Power</div>
+        </div>
+        <div class="tp-rec-stat">
+          <div class="tp-rec-stat-val">★${best.rating}</div>
+          <div class="tp-rec-stat-lbl">Rating</div>
+        </div>
+      </div>
+      <div class="tp-rec-why">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+        ${reason} · Safe range: ${Math.round(safeRadius)} km (50% of ${Math.round(actualKm)} km remaining)
+      </div>
+      <div class="tp-rec-actions">
+        <button class="btn-primary" style="flex:1;justify-content:center;font-size:.82rem;padding:10px 14px" onclick="openBookingModal('${best.id}')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Book This Station
+        </button>
+        <button class="btn-secondary" style="padding:10px 14px;font-size:.82rem" onclick="focusRecommendedStation('${best.id}', ${best.latitude}, ${best.longitude})">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          Show on Map
+        </button>
+      </div>
+    </div>`;
+
+  // Highlight the recommended station marker on map
+  focusRecommendedMarker(best.id);
+}
+
+// ── Helper: haversine in JS (same formula as server) ─────────────
+function haversineJS(lat1, lon1, lat2, lon2) {
+  const R    = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a    = Math.sin(dLat/2)**2 +
+               Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ── Focus recommended marker on map ──────────────────────────────
+function focusRecommendedMarker(stationId) {
+  // pulse the station card in the sidebar
+  const card = document.getElementById(`sc-${stationId}`);
+  if (card) {
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    card.classList.add('tp-recommended');
+    setTimeout(() => card.classList.remove('tp-recommended'), 3000);
+  }
+}
+
+function focusRecommendedStation(id, lat, lng) {
+  map.setView([lat, lng], 14);
+  openStationDetail(id);
+}
+
+// ── Clear trip planner ────────────────────────────────────────────
+function clearTripPlanner() {
+  tripDestLat  = null;
+  tripDestLng  = null;
+  tripDestName = '';
+  suggestionsData = [];
+
+  if (tripRouteLayer)  { tripRouteLayer.remove();  tripRouteLayer = null; }
+  if (tripDestMarker)  { tripDestMarker.remove();  tripDestMarker = null; }
+
+  document.getElementById('tp-input').value = '';
+  document.getElementById('tp-clear').style.display = 'none';
+  document.getElementById('tp-route-chip').style.display = 'none';
+  document.getElementById('tp-recommendation').style.display = 'none';
+  hideSuggestions();
+}
+
+// Close suggestions on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#trip-planner')) hideSuggestions();
+});

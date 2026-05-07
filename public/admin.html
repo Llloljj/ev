@@ -184,6 +184,23 @@
 </div>
 
 <script>
+// ── Admin Authorization Check ─────────────────────────────────
+const sessionUser = JSON.parse(localStorage.getItem('ev_user'));
+// Add your admin Google emails here:
+const ADMIN_EMAILS = [
+  'admin@evpath.com',
+  // You can add your actual Google email here to give yourself access, e.g.:
+  // 'myname@gmail.com'
+];
+
+if (!sessionUser) {
+  alert('You must be logged in to view the admin panel.');
+  window.location.href = '/login.html';
+} else if (!ADMIN_EMAILS.includes(sessionUser.email)) {
+  alert('Access Denied. You do not have admin privileges.');
+  window.location.href = '/index.html';
+}
+
 const API = 'http://localhost:3000/api';
 
 async function loadDashboard() {

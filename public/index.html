@@ -10,8 +10,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <!-- ethers.js — Blockchain / MetaMask -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
+
 
   <!-- Razorpay Checkout -->
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
@@ -42,7 +41,7 @@
   </div>
   <div class="nav-actions">
     <button id="theme-toggle" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button>
-    <div class="user-badge" onclick="openUserSwitcher()" title="Switch profile" style="cursor:pointer">
+    <div class="user-badge" onclick="openUserProfile()" title="Your Profile" style="cursor:pointer">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
       <span id="user-name-nav">Arjun Sharma</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;opacity:.5"><polyline points="6 9 12 15 18 9"/></svg>
@@ -68,13 +67,9 @@
       <div class="hero-stat"><div class="hero-stat-val" id="hstat-cities">0</div><div class="hero-stat-lbl">Cities</div></div>
     </div>
     <div class="hero-actions">
-      <button class="hero-btn-primary" onclick="startWithLocation()">
+      <button class="hero-btn-primary" onclick="startWithLocation()" style="width: 100%; max-width: 300px; justify-content: center; font-size: 1.1rem; padding: 16px;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
-        Locate Me
-      </button>
-      <button class="hero-btn-secondary" onclick="skipHero()">
-        Browse Map
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        Check My Surroundings
       </button>
     </div>
   </div>
@@ -108,6 +103,43 @@
       </div>
     </div>
 
+    <!-- ── Trip Planner ─────────────────────────────────────── -->
+    <div class="trip-planner" id="trip-planner">
+      <div class="tp-label">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+        Plan Your Trip
+      </div>
+      <div class="tp-search-wrap" id="tp-search-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        <input
+          type="text"
+          id="tp-input"
+          class="tp-input"
+          placeholder="Enter destination…"
+          autocomplete="off"
+          oninput="onTripInputChange(this.value)"
+          onkeydown="onTripInputKeydown(event)"
+        />
+        <button class="tp-clear" id="tp-clear" onclick="clearTripPlanner()" style="display:none" title="Clear">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+        <button class="tp-go-btn" id="tp-go-btn" onclick="confirmTripDestination()" title="Plan route">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+      <!-- Nominatim suggestions dropdown -->
+      <div class="tp-suggestions" id="tp-suggestions" style="display:none"></div>
+      <!-- Route info chip (appears after route is drawn) -->
+      <div class="tp-route-chip" id="tp-route-chip" style="display:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span id="tp-route-info">Calculating…</span>
+        <button onclick="clearTripPlanner()" class="tp-chip-close">✕</button>
+      </div>
+    </div>
+
+    <!-- ── Recommendation Banner (injected by JS) ──────────────── -->
+    <div id="tp-recommendation" style="display:none"></div>
+
     <!-- Search Bar -->
     <div class="search-bar-wrap">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -129,11 +161,18 @@
     <div class="filters">
       <div class="filter-row">
         <select id="filter-charger" onchange="applyFilters()">
-          <option value="">All Chargers</option>
-          <option value="CCS2">CCS2 (DC Fast)</option>
-          <option value="CHAdeMO">CHAdeMO</option>
-          <option value="Type2">Type 2 (AC)</option>
-          <option value="GB/T">GB/T</option>
+          <option value="">All Vehicles</option>
+          <optgroup label="🚗 4-Wheeler (Cars)">
+            <option value="CCS2">CCS2 (DC Fast)</option>
+            <option value="CHAdeMO">CHAdeMO</option>
+            <option value="Type2">Type 2 (AC)</option>
+            <option value="GB/T">GB/T</option>
+          </optgroup>
+          <optgroup label="🛵 2-Wheeler (Scooters)">
+            <option value="LECCS">Ather Grid (LECCS)</option>
+            <option value="Ola-Fast">Ola Hypercharger</option>
+            <option value="Wall Socket 3kW">Wall Socket / Universal</option>
+          </optgroup>
         </select>
         <select id="filter-radius" onchange="applyFilters()">
           <option value="10">10 km</option>
@@ -399,26 +438,24 @@
   </div>
 </div>
 
-<!-- User Switcher Modal -->
-<div class="modal-backdrop" id="user-switcher-modal" aria-hidden="true" onclick="closeUserSwitcher(event)">
-  <div class="modal" style="max-width:400px">
+<!-- User Profile Modal -->
+<div class="modal-backdrop" id="user-profile-modal" aria-hidden="true" onclick="closeUserProfile(event)">
+  <div class="modal" style="max-width:380px">
     <div class="modal-header">
-      <div><h3>Switch Profile</h3><p class="modal-subtitle">Demo accounts for presentation</p></div>
-      <button class="modal-close" onclick="document.getElementById('user-switcher-modal').classList.remove('open')" aria-label="Close">
+      <div><h3>Your Profile</h3></div>
+      <button class="modal-close" onclick="document.getElementById('user-profile-modal').classList.remove('open')" aria-label="Close">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
-      <div class="user-profile-card" id="ucard-user-demo-1" onclick="switchUser('user-demo-1','Arjun Sharma','Tata Nexon EV')">
-        <div class="upc-avatar" style="background:linear-gradient(135deg,#3B82F6,#06B6D4)">A</div>
-        <div class="upc-info"><div class="upc-name">Arjun Sharma</div><div class="upc-vehicle">Tata Nexon EV</div></div>
-        <div class="upc-check" id="check-user-demo-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
-      </div>
-      <div class="user-profile-card" id="ucard-user-demo-2" onclick="switchUser('user-demo-2','Priya Patel','MG ZS EV')">
-        <div class="upc-avatar" style="background:linear-gradient(135deg,#8B5CF6,#EC4899)">P</div>
-        <div class="upc-info"><div class="upc-name">Priya Patel</div><div class="upc-vehicle">MG ZS EV</div></div>
-        <div class="upc-check" id="check-user-demo-2" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
-      </div>
+      <button class="btn-secondary" style="width:100%;justify-content:center;padding:12px;" onclick="document.getElementById('user-profile-modal').classList.remove('open'); openVehicleProfile();">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v4h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+        Edit Vehicle Details
+      </button>
+      <button class="btn-danger" style="width:100%;justify-content:center;padding:12px;" onclick="logoutUser()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Log Out
+      </button>
     </div>
   </div>
 </div>
@@ -434,24 +471,7 @@
     </div>
     <div class="modal-body">
 
-      <!-- MetaMask Blockchain Pay (top, highlighted) -->
-      <button id="metamask-pay-btn" onclick="payWithMetaMask()" style="
-        display:flex;align-items:center;gap:12px;justify-content:center;
-        width:100%;padding:14px 20px;margin-bottom:16px;
-        background:linear-gradient(135deg,#F6851B,#E2761B);
-        color:#fff;border:none;border-radius:12px;font-size:1rem;
-        font-weight:700;cursor:pointer;font-family:inherit;
-        transition:all .2s;box-shadow:0 4px 20px rgba(246,133,27,.35);
-      " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
-        <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" width="26" height="26" alt="MetaMask">
-        Pay with MetaMask <span style="font-size:.8rem;opacity:.85;margin-left:4px">(Sepolia Testnet)</span>
-      </button>
 
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-        <div style="flex:1;height:1px;background:var(--border)"></div>
-        <span style="font-size:.75rem;color:var(--text3)">or pay with</span>
-        <div style="flex:1;height:1px;background:var(--border)"></div>
-      </div>
 
       <!-- Traditional Pay Methods -->
       <div class="pay-methods">
@@ -479,7 +499,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         <span id="pay-btn-text">Pay Now</span>
       </button>
-      <div class="pay-secure">256-bit SSL encrypted &middot; Sepolia Blockchain &middot; Secured by VoltPay</div>
+      <div class="pay-secure">256-bit SSL encrypted &middot; Secured by VoltPay</div>
     </div>
   </div>
 </div>
