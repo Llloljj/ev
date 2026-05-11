@@ -70,7 +70,8 @@ app.get('/api/auth/me', async (req, res) => {
   if (error || !user) return res.status(401).json({ success: false, message: 'Session expired' });
 
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-  res.json({ success: true, user: { ...user, ...(profile || {}) } });
+  const { data: admin } = await supabase.from('admins').select('*').eq('user_id', user.id).single();
+  res.json({ success: true, user: { ...user, ...(profile || {}), isAdmin: !!admin } });
 });
 
 // PATCH /api/auth/vehicle — save vehicle info + calculate degradation
