@@ -185,23 +185,33 @@
 
 <script>
 // ── Admin Authorization Check ─────────────────────────────────
-const sessionUser = JSON.parse(localStorage.getItem('ev_user'));
-// Add your admin Google emails here:
-const ADMIN_EMAILS = [
-  'admin@evpath.com',
-  // You can add your actual Google email here to give yourself access, e.g.:
-  // 'myname@gmail.com'
-];
+const token = localStorage.getItem('ev_session_token');
 
-if (!sessionUser) {
+if (!token) {
   alert('You must be logged in to view the admin panel.');
   window.location.href = '/login.html';
-} else if (!ADMIN_EMAILS.includes(sessionUser.email)) {
-  alert('Access Denied. You do not have admin privileges.');
-  window.location.href = '/index.html';
 }
 
 const API = 'http://localhost:3000/api';
+
+// Check authorization
+fetch('/api/auth/me', {
+  headers: { 'x-session-token': token }
+})
+.then(r => r.json())
+.then(data => {
+  if (!data.success || !data.user.isAdmin) {
+    alert('Access Denied. You do not have admin privileges.');
+    window.location.href = '/index.html';
+  } else {
+    loadDashboard();
+    startLiveTimer();
+  }
+})
+.catch(() => {
+  alert('Error verifying authorization.');
+  window.location.href = '/index.html';
+});
 
 async function loadDashboard() {
   const [statsRes, stationsRes, bookingsRes] = await Promise.all([
@@ -305,13 +315,14 @@ function showAdminSection(name, el) {
   el.classList.add('active');
 }
 
-loadDashboard();
-const _liveTimer = setInterval(() => {
-  loadDashboard();
-  // Flash live dot
-  const dot = document.getElementById('live-indicator');
-  if (dot) { dot.style.opacity = '0.4'; setTimeout(() => dot.style.opacity = '1', 300); }
-}, 15000);
+function startLiveTimer() {
+  setInterval(() => {
+    loadDashboard();
+    // Flash live dot
+    const dot = document.getElementById('live-indicator');
+    if (dot) { dot.style.opacity = '0.4'; setTimeout(() => dot.style.opacity = '1', 300); }
+  }, 15000);
+}
 
 function exportCSV() {
   fetch(`${API}/bookings`).then(r => r.json()).then(({ bookings }) => {
