@@ -113,3 +113,15 @@ VALUES
   (gen_random_uuid()::text,'Bajaj Chetak Charging - JK Road','7F74+RWG, JK Road, Bhopal 462023',23.2555,77.4590,'["Wall Socket 3kW"]',2,2,8.0,0,'["Parking"]',4.0,'Bajaj Auto',3,FALSE),
   (gen_random_uuid()::text,'TVS iQube - IOCL Vidisha Road','Shop No 452/2 Lalariya, Vidisha Road, Bhopal',23.2900,77.5200,'["Wall Socket 3kW"]',2,1,8.0,10,'["Petrol Station","Parking"]',4.0,'TVS Motor / IOCL',3,FALSE)
 ON CONFLICT (id) DO NOTHING;
+
+-- 4. ADMINS (Added in Phase 1)
+CREATE TABLE IF NOT EXISTS admins (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Enable RLS
+ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
+
+-- Admins: only service_role can read/write (backend)
+CREATE POLICY "admins_service_all" ON admins FOR ALL USING (auth.role() = 'service_role');
