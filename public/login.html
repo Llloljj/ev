@@ -115,16 +115,24 @@
         localStorage.setItem('ev_session_token', session.access_token);
         localStorage.setItem('ev_user', JSON.stringify(session.user));
 
-        // Check if vehicle setup is needed
-        const { data: profile } = await _supabase
-          .from('profiles')
-          .select('vehicle_model')
-          .eq('id', session.user.id)
-          .single();
+        // Call our backend to get profile and admin status
+        const res = await fetch('/api/auth/me', {
+          headers: { 'x-session-token': session.access_token }
+        });
+        const data = await res.json();
 
-        if (!profile?.vehicle_model) {
-          document.getElementById('login-step-1').style.display = 'none';
-          document.getElementById('login-step-2').style.display = 'block';
+        if (data.success) {
+          if (data.user.isAdmin) {
+            window.location.href = '/admin.html';
+            return;
+          }
+          
+          if (!data.user.vehicle_model) {
+            document.getElementById('login-step-1').style.display = 'none';
+            document.getElementById('login-step-2').style.display = 'block';
+          } else {
+            window.location.href = '/';
+          }
         } else {
           window.location.href = '/';
         }
@@ -134,8 +142,18 @@
       // Already have a stored token? Verify it's still valid
       const stored = localStorage.getItem('ev_session_token');
       if (stored) {
-        const { data: { user } } = await _supabase.auth.getUser(stored);
-        if (user) { window.location.href = '/'; return; }
+        const res = await fetch('/api/auth/me', {
+          headers: { 'x-session-token': stored }
+        });
+        const data = await res.json();
+        if (data.success) {
+          if (data.user.isAdmin) {
+            window.location.href = '/admin.html';
+          } else {
+            window.location.href = '/';
+          }
+          return;
+        }
         localStorage.removeItem('ev_session_token');
       }
 
