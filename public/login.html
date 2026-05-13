@@ -526,6 +526,13 @@
         document.getElementById('login-step-1').style.display = 'none';
         document.getElementById('login-step-2').style.display = 'none';
         document.getElementById('login-step-manager').style.display = 'block';
+        
+        // Pre-fill station ID if coming from map
+        const prefill = localStorage.getItem('ev_prefill_station_id');
+        if (prefill) {
+          document.getElementById('station-id-input').value = prefill;
+          localStorage.removeItem('ev_prefill_station_id');
+        }
       } else {
         window.location.href = '/manager.html';
       }

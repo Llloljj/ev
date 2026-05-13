@@ -192,7 +192,7 @@ if (!token) {
   window.location.href = '/login.html';
 }
 
-const API = 'http://localhost:3000/api';
+const API = window.location.origin + '/api';
 
 // Check authorization
 fetch('/api/auth/me', {

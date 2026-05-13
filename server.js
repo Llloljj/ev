@@ -72,12 +72,14 @@ app.get('/api/auth/me', async (req, res) => {
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
   const { data: admin } = await supabase.from('admins').select('*').eq('user_id', user.id).single();
   
-  const { data: manager } = await supabase
+  const { data: managers } = await supabase
     .from('station_managers')
     .select('*, stations(name, address)')
     .eq('user_id', user.id)
-    .single();
+    .order('created_at', { ascending: false })
+    .limit(1);
 
+  const manager = managers && managers.length > 0 ? managers[0] : null;
   const isManagerVerified = !!manager;
   const managerStation = manager ? { id: manager.station_id, name: manager.stations?.name, address: manager.stations?.address } : null;
 
@@ -136,6 +138,21 @@ app.patch('/api/auth/manager', requireAuth, async (req, res) => {
 
 // POST /api/auth/logout — Supabase handles invalidation client-side
 app.post('/api/auth/logout', (req, res) => res.json({ success: true }));
+
+// GET /api/health — diagnostic endpoint
+app.get('/api/health', async (req, res) => {
+  const { count, error } = await supabase.from('stations').select('id', { count: 'exact', head: true });
+  res.json({
+    success: !error,
+    database: error ? 'disconnected' : 'connected',
+    stationCount: count || 0,
+    env: {
+      supabaseUrl: !!process.env.SUPABASE_URL,
+      supabaseServiceKey: !!process.env.SUPABASE_SERVICE_KEY,
+      supabaseAnonKey: !!process.env.SUPABASE_ANON_KEY
+    }
+  });
+});
 
 // ─── Station Routes ────────────────────────────────────────────────────────────
 
@@ -219,7 +236,8 @@ app.get('/api/stations/:id/slots', async (req, res) => {
 
 // GET /api/manager/dashboard
 app.get('/api/manager/dashboard', requireAuth, async (req, res) => {
-  const { data: manager } = await supabase.from('station_managers').select('*').eq('user_id', req.user.id).single();
+  const { data: managers } = await supabase.from('station_managers').select('*').eq('user_id', req.user.id).order('created_at', { ascending: false }).limit(1);
+  const manager = managers && managers.length > 0 ? managers[0] : null;
   if (!manager) return res.status(403).json({ success: false, message: 'Not a manager' });
 
   // Get total bookings for their station
@@ -242,7 +260,8 @@ app.get('/api/manager/slots', requireAuth, async (req, res) => {
   const { date } = req.query;
   const targetDate = date || new Date().toISOString().split('T')[0];
   
-  const { data: manager } = await supabase.from('station_managers').select('*').eq('user_id', req.user.id).single();
+  const { data: managers } = await supabase.from('station_managers').select('*').eq('user_id', req.user.id).order('created_at', { ascending: false }).limit(1);
+  const manager = managers && managers.length > 0 ? managers[0] : null;
   if (!manager) return res.status(403).json({ success: false, message: 'Not a manager' });
 
   const { data: station } = await supabase.from('stations').select('total_slots').eq('id', manager.station_id).single();
@@ -275,7 +294,8 @@ app.get('/api/manager/slots', requireAuth, async (req, res) => {
 // POST /api/manager/slots/toggle
 app.post('/api/manager/slots/toggle', requireAuth, async (req, res) => {
   const { slot_time, is_available } = req.body;
-  const { data: manager } = await supabase.from('station_managers').select('*').eq('user_id', req.user.id).single();
+  const { data: managers } = await supabase.from('station_managers').select('*').eq('user_id', req.user.id).order('created_at', { ascending: false }).limit(1);
+  const manager = managers && managers.length > 0 ? managers[0] : null;
   if (!manager) return res.status(403).json({ success: false });
 
   const { error } = await supabase.from('station_slots').upsert({
