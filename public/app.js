@@ -70,12 +70,14 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // ── Boot app ────────────────────────────────────────────────
   initMap();
-  loadStations();
   checkPage();
   applyVehicleProfileUI();
   updateNavUser();
   loadHeroStats();
   initTheme();
+  
+  // Load all stations across India by default at start
+  loadStations(null, null);
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     document.querySelectorAll('.modal-backdrop.open').forEach(m => m.classList.remove('open'));
@@ -247,6 +249,12 @@ function renderMapMarkers(stations) {
     m.on('click', () => openStationDetail(s.id));
     stationMarkers.push(m);
   });
+  
+  // If no user location, zoom map to show all stations
+  if (stations.length > 0 && !userLat) {
+    const group = new L.featureGroup(stationMarkers);
+    map.fitBounds(group.getBounds().pad(0.1));
+  }
 }
 
 // ── Station Detail ─────────────────────────────────────────────
