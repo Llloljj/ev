@@ -208,11 +208,6 @@
           </div>
         </div>
 
-        <div id="manager-placeholder" style="display:none; padding: 20px 0;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" style="width:64px;height:64px;margin-bottom:16px"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-          <h3 style="color:#1e293b; font-size: 1.2rem; margin-bottom: 8px;">Station Manager Portal</h3>
-          <p style="color:#64748b; font-size: 0.9rem; line-height: 1.5;">Coming soon. We are building powerful tools for station operators to monitor, manage, and optimize their charging networks.</p>
-        </div>
 
         <div id="login-error"></div>
       </div>
@@ -266,6 +261,35 @@
         </button>
       </div>
 
+      <!-- STEP 3: Manager Setup -->
+      <div id="login-step-manager" style="display: none;">
+        <h2>Manager Verification</h2>
+        <p class="subtitle">Enter your operator ID to access the portal.</p>
+
+        <div class="input-group" style="margin-top: 1.5rem;">
+          <label for="verified-id-input">Verified Employee/Operator ID</label>
+          <div class="input-wrapper">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <input type="text" id="verified-id-input" placeholder="e.g. OP-8492">
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label for="station-id-input">Station ID</label>
+          <div class="input-wrapper">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            <input type="text" id="station-id-input" placeholder="Enter Station ID to link">
+          </div>
+        </div>
+
+        <div id="manager-error" style="display: none; margin-top: 16px; padding: 12px 16px; background: #fee2e2; border: 1px solid #fecaca; border-radius: 8px; color: #ef4444; font-size: 0.85rem; text-align: left;"></div>
+
+        <button class="btn-signin" id="verify-manager-btn" style="margin-top: 24px;" onclick="saveManagerSetup()">
+          Verify &amp; Enter Portal
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+
     </div>
   </main>
 
@@ -296,13 +320,10 @@
     document.querySelectorAll('.role-tab').forEach(t => t.classList.remove('active'));
     document.getElementById(`tab-${role}`).classList.add('active');
 
-    if (role === 'manager') {
-      document.getElementById('login-form-area').style.display = 'none';
-      document.getElementById('manager-placeholder').style.display = 'block';
-    } else {
-      document.getElementById('login-form-area').style.display = 'block';
-      document.getElementById('manager-placeholder').style.display = 'none';
-    }
+    document.getElementById('login-form-area').style.display = 'block';
+    
+    // Save the intended role so we know where to redirect them after OAuth
+    localStorage.setItem('ev_intended_role', role);
   }
 
   function handleSignIn() {
@@ -340,16 +361,7 @@
       const data = await res.json();
 
       if (data.success) {
-        if (data.user.isAdmin) {
-          window.location.href = '/admin.html';
-          return;
-        }
-        if (!data.user.vehicle_model) {
-          document.getElementById('login-step-1').style.display = 'none';
-          document.getElementById('login-step-2').style.display = 'block';
-        } else {
-          window.location.href = '/';
-        }
+        handleLoginRedirect(data.user);
       } else {
         window.location.href = '/';
       }
@@ -361,8 +373,7 @@
       const res = await fetch('/api/auth/me', { headers: { 'x-session-token': stored } });
       const data = await res.json();
       if (data.success) {
-        if (data.user.isAdmin) window.location.href = '/admin.html';
-        else window.location.href = '/';
+        handleLoginRedirect(data.user);
         return;
       }
       localStorage.removeItem('ev_session_token');
@@ -461,6 +472,73 @@
       btn.disabled  = false;
     }
   };
+
+  window.saveManagerSetup = async function() {
+    const verified_id = document.getElementById('verified-id-input').value.trim();
+    const station_id  = document.getElementById('station-id-input').value.trim();
+    const errorEl = document.getElementById('manager-error');
+
+    errorEl.style.display = 'none';
+
+    if (!verified_id || !station_id) {
+      errorEl.textContent = '⚠ Please enter both Verified ID and Station ID.';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    const btn = document.getElementById('verify-manager-btn');
+    btn.innerHTML = 'Verifying...';
+    btn.disabled  = true;
+
+    const token = localStorage.getItem('ev_session_token');
+    if (!token) return window.location.href = '/login.html';
+
+    try {
+      const res  = await fetch('/api/auth/manager', {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+        body:    JSON.stringify({ verified_id, station_id })
+      });
+      const data = await res.json();
+      if (data.success) {
+        window.location.href = '/manager.html';
+      } else {
+        errorEl.textContent = '⚠ ' + (data.message || 'Verification failed.');
+        errorEl.style.display = 'block';
+        btn.innerHTML = 'Verify & Enter Portal';
+        btn.disabled  = false;
+      }
+    } catch {
+      errorEl.textContent = '⚠ Network error. Is the server running?';
+      errorEl.style.display = 'block';
+      btn.innerHTML = 'Verify & Enter Portal';
+      btn.disabled  = false;
+    }
+  };
+
+  function handleLoginRedirect(user) {
+    if (user.isAdmin) return window.location.href = '/admin.html';
+    
+    const intendedRole = localStorage.getItem('ev_intended_role') || 'user';
+    
+    if (intendedRole === 'manager') {
+      if (!user.isManagerVerified) {
+        document.getElementById('login-step-1').style.display = 'none';
+        document.getElementById('login-step-2').style.display = 'none';
+        document.getElementById('login-step-manager').style.display = 'block';
+      } else {
+        window.location.href = '/manager.html';
+      }
+    } else {
+      if (!user.vehicle_model) {
+        document.getElementById('login-step-1').style.display = 'none';
+        document.getElementById('login-step-manager').style.display = 'none';
+        document.getElementById('login-step-2').style.display = 'block';
+      } else {
+        window.location.href = '/';
+      }
+    }
+  }
 </script>
 </body>
 </html>

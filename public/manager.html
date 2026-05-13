@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Station Manager Portal - EV Volt Pro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* Base & Dark Theme matching the screenshot */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { 
+      font-family: 'Inter', sans-serif; 
+      background: #0f172a; 
+      color: #f8fafc;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 260px;
+      background: #1e293b;
+      border-right: 1px solid #334155;
+      display: flex;
+      flex-direction: column;
+      padding: 24px 0;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 24px 32px;
+    }
+    .brand svg { width: 32px; height: 32px; color: #fbbf24; fill: #fbbf24; }
+    .brand-text h1 { font-size: 1.25rem; font-weight: 700; color: #fbbf24; letter-spacing: -0.5px; margin-bottom: 2px;}
+    .brand-text p { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;}
+    
+    .nav-menu { flex: 1; }
+    .nav-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 24px;
+      color: #cbd5e1; font-weight: 500; font-size: 0.95rem;
+      cursor: pointer; transition: all 0.2s;
+      border-left: 3px solid transparent;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
+    .nav-item.active {
+      background: #fbbf24;
+      color: #0f172a;
+      border-left: 3px solid #f59e0b;
+      font-weight: 600;
+    }
+    .nav-item svg { width: 20px; height: 20px; }
+
+    .sidebar-footer { padding: 24px; border-top: 1px solid #334155; }
+    .sidebar-footer .nav-item { padding: 12px 0; border: none; }
+
+    /* Main Content */
+    .main-wrapper {
+      flex: 1; display: flex; flex-direction: column;
+      background: #0f172a;
+    }
+    
+    /* Top Bar */
+    .topbar {
+      height: 72px; border-bottom: 1px solid #334155;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0 40px; background: #0f172a; flex-shrink: 0;
+    }
+    .topbar h2 { font-size: 1.4rem; font-weight: 600; color: #f8fafc; }
+    .top-actions { display: flex; align-items: center; gap: 24px; }
+    .search-bar {
+      background: #1e293b; border: 1px solid #334155; border-radius: 99px;
+      padding: 8px 16px; display: flex; align-items: center; gap: 8px;
+    }
+    .search-bar svg { width: 16px; height: 16px; color: #94a3b8; }
+    .search-bar input { background: transparent; border: none; color: #f8fafc; outline: none; font-size: 0.9rem;}
+    .user-profile {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: #334155; display: flex; align-items: center; justify-content: center;
+      font-weight: 600; color: #fbbf24; border: 2px solid #fbbf24;
+    }
+
+    /* Content Area */
+    .content { flex: 1; padding: 40px; overflow-y: auto; }
+    .header-section { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; }
+    .page-title h3 { font-size: 1.8rem; font-weight: 700; margin-bottom: 8px; color: #ffffff;}
+    .page-title p { color: #94a3b8; font-size: 0.95rem; display: flex; align-items: center; gap: 8px;}
+    
+    .status-badge {
+      background: rgba(34, 197, 94, 0.1); color: #4ade80;
+      padding: 6px 12px; border-radius: 99px; font-size: 0.8rem; font-weight: 600;
+      border: 1px solid rgba(34, 197, 94, 0.2);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .status-badge::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80;}
+
+    /* Cards */
+    .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 32px; }
+    .metric-card {
+      background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+      padding: 24px; position: relative; overflow: hidden;
+    }
+    .metric-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px; }
+    .metric-card.revenue::before { background: #3b82f6; }
+    .metric-card.bookings::before { background: #fbbf24; }
+    .metric-card.utilization::before { background: #ec4899; }
+    
+    .mc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .icon-box { width: 40px; height: 40px; border-radius: 8px; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; }
+    .icon-box svg { width: 20px; height: 20px; color: #cbd5e1; }
+    .metric-card h4 { color: #94a3b8; font-size: 0.9rem; font-weight: 500; margin-bottom: 4px; }
+    .metric-card .value { font-size: 2rem; font-weight: 700; color: #f8fafc; }
+
+    /* Views */
+    .view-section { display: none; }
+    .view-section.active { display: block; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Slot Management UI */
+    .date-selector { margin-bottom: 24px; display: flex; align-items: center; gap: 16px; }
+    .date-selector input[type="date"] {
+      background: #1e293b; border: 1px solid #334155; color: #f8fafc;
+      padding: 10px 16px; border-radius: 8px; font-family: inherit; font-size: 1rem;
+    }
+    
+    .slots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+    .slot-item {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px;
+      display: flex; justify-content: space-between; align-items: center;
+      transition: border-color 0.2s;
+    }
+    .slot-item:hover { border-color: #475569; }
+    .slot-time { font-size: 1.1rem; font-weight: 600; color: #f8fafc; margin-bottom: 4px; }
+    .slot-status { font-size: 0.85rem; color: #94a3b8; }
+    .slot-status span { font-weight: 600; color: #3b82f6; }
+    
+    .toggle-btn {
+      padding: 8px 16px; border-radius: 6px; font-weight: 600; font-size: 0.85rem;
+      border: none; cursor: pointer; transition: all 0.2s;
+    }
+    .toggle-btn.open { background: rgba(34, 197, 94, 0.1); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+    .toggle-btn.open:hover { background: rgba(34, 197, 94, 0.2); }
+    .toggle-btn.blocked { background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+    .toggle-btn.blocked:hover { background: rgba(239, 68, 68, 0.2); }
+    
+    /* Loading Overlay */
+    #loading-overlay {
+      position: absolute; inset: 0; background: #0f172a; z-index: 50;
+      display: flex; align-items: center; justify-content: center; flex-direction: column; color: #fbbf24;
+    }
+    .spinner { border: 3px solid rgba(251, 191, 36, 0.3); border-top-color: #fbbf24; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 16px;}
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Placeholder panels */
+    .placeholder-panel {
+      background: #1e293b; border: 1px dashed #334155; border-radius: 12px;
+      padding: 40px; text-align: center; color: #64748b; font-size: 1.1rem; font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Loading State -->
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <h3 style="color: #f8fafc;">Authenticating Manager...</h3>
+  </div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      <div class="brand-text">
+        <h1>EV Volt</h1>
+        <p>Infrastructure HQ</p>
+      </div>
+    </div>
+    <div class="nav-menu">
+      <div class="nav-item active" onclick="switchTab('dashboard')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item" onclick="switchTab('slots')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Slot Management
+      </div>
+      <div class="nav-item" onclick="switchTab('chargers')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+        Charger Status
+      </div>
+      <div class="nav-item" onclick="switchTab('analytics')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Analytics
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <div class="nav-item" style="color: #ef4444;" onclick="logout()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Logout
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main-wrapper">
+    <header class="topbar">
+      <h2>EV Volt Pro</h2>
+      <div class="top-actions">
+        <div class="search-bar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" placeholder="Search...">
+        </div>
+        <div class="user-profile" id="user-initials">M</div>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="header-section">
+        <div class="page-title">
+          <h3 id="view-title">Station Overview</h3>
+          <p>Assigned station: <strong id="station-name-display" style="color:#fbbf24; margin-left: 6px;">Loading...</strong></p>
+        </div>
+        <div class="status-badge">System Live</div>
+      </div>
+
+      <!-- DASHBOARD VIEW -->
+      <div id="view-dashboard" class="view-section active">
+        <div class="metrics-grid">
+          <div class="metric-card revenue">
+            <div class="mc-header">
+              <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M12 12h.01"/></svg></div>
+            </div>
+            <h4>Today's Revenue</h4>
+            <div class="value" id="stat-revenue">₹ --</div>
+          </div>
+          <div class="metric-card bookings">
+            <div class="mc-header">
+              <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+            </div>
+            <h4>Total Bookings</h4>
+            <div class="value" id="stat-bookings">--</div>
+          </div>
+          <div class="metric-card utilization">
+            <div class="mc-header">
+              <div class="icon-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+            </div>
+            <h4>Status</h4>
+            <div class="value" style="color: #4ade80;">Active</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLOT MANAGEMENT VIEW -->
+      <div id="view-slots" class="view-section">
+        <div class="date-selector">
+          <label>Select Date:</label>
+          <input type="date" id="slot-date-picker" onchange="fetchSlots()">
+        </div>
+        <div class="slots-grid" id="slots-container">
+          <p style="color: #94a3b8;">Loading slots...</p>
+        </div>
+      </div>
+
+      <!-- CHARGER STATUS VIEW -->
+      <div id="view-chargers" class="view-section">
+        <div class="placeholder-panel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="48" height="48" style="margin-bottom: 16px; opacity: 0.5;"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/></svg><br>
+          Live Charger Hardware Status & Telemetry will appear here.
+        </div>
+      </div>
+
+      <!-- ANALYTICS VIEW -->
+      <div id="view-analytics" class="view-section">
+        <div class="placeholder-panel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="48" height="48" style="margin-bottom: 16px; opacity: 0.5;"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg><br>
+          Historical Booking & Revenue Analytics will appear here.
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    let globalToken = '';
+
+    async function loadManagerData() {
+      const token = localStorage.getItem('ev_session_token');
+      if (!token) return window.location.href = '/login.html';
+      globalToken = token;
+
+      try {
+        const res = await fetch('/api/auth/me', { headers: { 'x-session-token': token } });
+        const data = await res.json();
+        
+        if (data.success && data.user.isManagerVerified) {
+          document.getElementById('loading-overlay').style.display = 'none';
+          document.getElementById('station-name-display').textContent = data.user.managerStation?.name || 'Unknown Station';
+          if (data.user.name) document.getElementById('user-initials').textContent = data.user.name.charAt(0).toUpperCase();
+
+          // Set today as default date
+          document.getElementById('slot-date-picker').value = new Date().toISOString().split('T')[0];
+
+          // Fetch initial dashboard stats
+          fetchDashboardStats();
+        } else {
+          window.location.href = '/login.html';
+        }
+      } catch (err) {
+        console.error(err);
+        window.location.href = '/login.html';
+      }
+    }
+
+    // --- Tab Switching ---
+    const viewTitles = {
+      'dashboard': 'Station Overview',
+      'slots': 'Slot Management',
+      'chargers': 'Charger Hardware Status',
+      'analytics': 'Performance Analytics'
+    };
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+
+      document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+      document.getElementById(`view-${tabId}`).classList.add('active');
+      document.getElementById('view-title').textContent = viewTitles[tabId];
+
+      if (tabId === 'dashboard') fetchDashboardStats();
+      if (tabId === 'slots') fetchSlots();
+    }
+
+    // --- API Calls ---
+    async function fetchDashboardStats() {
+      try {
+        const res = await fetch('/api/manager/dashboard', { headers: { 'x-session-token': globalToken } });
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('stat-revenue').textContent = '₹ ' + data.stats.todayRevenue.toLocaleString();
+          document.getElementById('stat-bookings').textContent = data.stats.totalBookings;
+        }
+      } catch (err) { console.error('Failed to load dashboard stats', err); }
+    }
+
+    async function fetchSlots() {
+      const date = document.getElementById('slot-date-picker').value;
+      const container = document.getElementById('slots-container');
+      container.innerHTML = '<p style="color:#94a3b8;">Loading...</p>';
+
+      try {
+        const res = await fetch(`/api/manager/slots?date=${date}`, { headers: { 'x-session-token': globalToken } });
+        const data = await res.json();
+        if (data.success) {
+          container.innerHTML = '';
+          data.slots.forEach(slot => {
+            const available = Math.max(0, slot.total_capacity - slot.booked_count);
+            
+            const btnClass = slot.is_blocked ? 'blocked' : 'open';
+            const btnText  = slot.is_blocked ? 'Blocked (Click to Open)' : 'Open (Click to Block)';
+            const toggleArg = !slot.is_blocked;
+
+            const div = document.createElement('div');
+            div.className = 'slot-item';
+            div.innerHTML = `
+              <div>
+                <div class="slot-time">${slot.display}</div>
+                <div class="slot-status">
+                  ${slot.is_blocked ? 'Slot explicitly blocked' : `Booked: <span>${slot.booked_count}</span> / ${slot.total_capacity}`}
+                </div>
+              </div>
+              <button class="toggle-btn ${btnClass}" onclick="toggleSlot('${slot.time}', ${toggleArg})">${btnText}</button>
+            `;
+            container.appendChild(div);
+          });
+        }
+      } catch (err) { console.error(err); }
+    }
+
+    async function toggleSlot(time, isAvailable) {
+      try {
+        const res = await fetch('/api/manager/slots/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-session-token': globalToken },
+          body: JSON.stringify({ slot_time: time, is_available: isAvailable })
+        });
+        const data = await res.json();
+        if (data.success) {
+          fetchSlots(); // refresh view
+        } else {
+          alert('Failed to update slot status.');
+        }
+      } catch (err) { console.error(err); }
+    }
+
+    function logout() {
+      localStorage.removeItem('ev_session_token');
+      localStorage.removeItem('ev_user');
+      localStorage.removeItem('ev_intended_role');
+      window.location.href = '/login.html';
+    }
+
+    window.addEventListener('DOMContentLoaded', loadManagerData);
+  </script>
+</body>
+</html>

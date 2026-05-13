@@ -71,7 +71,17 @@ app.get('/api/auth/me', async (req, res) => {
 
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
   const { data: admin } = await supabase.from('admins').select('*').eq('user_id', user.id).single();
-  res.json({ success: true, user: { ...user, ...(profile || {}), isAdmin: !!admin } });
+  
+  const { data: manager } = await supabase
+    .from('station_managers')
+    .select('*, stations(name, address)')
+    .eq('user_id', user.id)
+    .single();
+
+  const isManagerVerified = !!manager;
+  const managerStation = manager ? { id: manager.station_id, name: manager.stations?.name, address: manager.stations?.address } : null;
+
+  res.json({ success: true, user: { ...user, ...(profile || {}), isAdmin: !!admin, isManagerVerified, managerStation } });
 });
 
 // PATCH /api/auth/vehicle — save vehicle info + calculate degradation
@@ -94,6 +104,34 @@ app.patch('/api/auth/vehicle', requireAuth, async (req, res) => {
 
   if (error) return res.status(500).json({ success: false, message: error.message });
   res.json({ success: true, user: profile, degradation_pct, effective_capacity: Math.round(effective_capacity * 10) / 10 });
+});
+
+// PATCH /api/auth/manager — save manager verification info
+app.patch('/api/auth/manager', requireAuth, async (req, res) => {
+  const { verified_id, station_id } = req.body;
+  
+  if (!verified_id || !station_id) return res.status(400).json({ success: false, message: 'Please provide both Verified ID and Station ID' });
+
+  // Check if station exists
+  const { data: station } = await supabase.from('stations').select('id').eq('id', station_id).single();
+  if (!station) return res.status(404).json({ success: false, message: 'Invalid Station ID. Please check and try again.' });
+
+  const { data: manager, error } = await supabase
+    .from('station_managers')
+    .insert({
+      user_id: req.user.id,
+      station_id: station_id,
+      verified_id: verified_id
+    })
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === '23505') return res.status(400).json({ success: false, message: 'You are already registered as a manager for this station.' });
+    return res.status(500).json({ success: false, message: error.message });
+  }
+
+  res.json({ success: true, manager });
 });
 
 // POST /api/auth/logout — Supabase handles invalidation client-side
@@ -151,19 +189,103 @@ app.get('/api/stations/:id/slots', async (req, res) => {
 
   const bookedSlots = (bookedRows || []).map(r => r.slot_time);
 
+  // Check explicitly blocked slots
+  const { data: blockedRows } = await supabase
+    .from('station_slots')
+    .select('slot_time')
+    .eq('station_id', req.params.id)
+    .like('slot_time', `${targetDate}%`)
+    .eq('is_available', false);
+  const blockedSlots = (blockedRows || []).map(r => r.slot_time);
+
   const slots = [];
   for (let h = 6; h <= 22; h++) {
     const timeStr = `${targetDate}T${String(h).padStart(2, '0')}:00:00`;
     const booked  = bookedSlots.filter(s => s.startsWith(timeStr)).length;
+    const isBlocked = blockedSlots.includes(timeStr);
+    
     slots.push({
       time:     timeStr,
       display:  `${String(h).padStart(2, '0')}:00`,
-      available: Math.max(0, station.total_slots - booked),
+      available: isBlocked ? 0 : Math.max(0, station.total_slots - booked),
       total:     station.total_slots,
       is_peak:  (h >= 8 && h <= 10) || (h >= 17 && h <= 20)
     });
   }
   res.json({ success: true, date: targetDate, slots });
+});
+
+// ─── Manager Routes ────────────────────────────────────────────────────────────
+
+// GET /api/manager/dashboard
+app.get('/api/manager/dashboard', requireAuth, async (req, res) => {
+  const { data: manager } = await supabase.from('station_managers').select('*').eq('user_id', req.user.id).single();
+  if (!manager) return res.status(403).json({ success: false, message: 'Not a manager' });
+
+  // Get total bookings for their station
+  const { count: totalBookings } = await supabase.from('bookings').select('*', { count: 'exact', head: true })
+    .eq('station_id', manager.station_id);
+
+  // Get today's revenue
+  const today = new Date().toISOString().split('T')[0];
+  const { data: todayBookings } = await supabase.from('bookings').select('amount')
+    .eq('station_id', manager.station_id)
+    .like('slot_time', `${today}%`);
+  
+  const revenue = (todayBookings || []).reduce((sum, b) => sum + (b.amount || 0), 0);
+
+  res.json({ success: true, stats: { totalBookings: totalBookings || 0, todayRevenue: revenue } });
+});
+
+// GET /api/manager/slots
+app.get('/api/manager/slots', requireAuth, async (req, res) => {
+  const { date } = req.query;
+  const targetDate = date || new Date().toISOString().split('T')[0];
+  
+  const { data: manager } = await supabase.from('station_managers').select('*').eq('user_id', req.user.id).single();
+  if (!manager) return res.status(403).json({ success: false, message: 'Not a manager' });
+
+  const { data: station } = await supabase.from('stations').select('total_slots').eq('id', manager.station_id).single();
+  
+  const { data: bookedRows } = await supabase.from('bookings').select('slot_time')
+    .eq('station_id', manager.station_id).eq('status', 'confirmed').like('slot_time', `${targetDate}%`);
+  const bookedSlots = (bookedRows || []).map(r => r.slot_time);
+
+  const { data: blockedRows } = await supabase.from('station_slots').select('slot_time, is_available')
+    .eq('station_id', manager.station_id).like('slot_time', `${targetDate}%`).eq('is_available', false);
+  const blockedSlots = (blockedRows || []).map(r => r.slot_time);
+
+  const slots = [];
+  for (let h = 6; h <= 22; h++) {
+    const timeStr = `${targetDate}T${String(h).padStart(2, '0')}:00:00`;
+    const booked = bookedSlots.filter(s => s.startsWith(timeStr)).length;
+    const isBlocked = blockedSlots.includes(timeStr);
+    
+    slots.push({
+      time: timeStr,
+      display: `${String(h).padStart(2, '0')}:00`,
+      booked_count: booked,
+      total_capacity: station.total_slots,
+      is_blocked: isBlocked
+    });
+  }
+  res.json({ success: true, slots });
+});
+
+// POST /api/manager/slots/toggle
+app.post('/api/manager/slots/toggle', requireAuth, async (req, res) => {
+  const { slot_time, is_available } = req.body;
+  const { data: manager } = await supabase.from('station_managers').select('*').eq('user_id', req.user.id).single();
+  if (!manager) return res.status(403).json({ success: false });
+
+  const { error } = await supabase.from('station_slots').upsert({
+    station_id: manager.station_id,
+    slot_time,
+    is_available
+  });
+
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true });
 });
 
 // ─── Booking Routes ────────────────────────────────────────────────────────────

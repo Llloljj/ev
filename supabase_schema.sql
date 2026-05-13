@@ -125,3 +125,61 @@ ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
 
 -- Admins: only service_role can read/write (backend)
 CREATE POLICY "admins_service_all" ON admins FOR ALL USING (auth.role() = 'service_role');
+
+-- 5. STATION MANAGERS
+CREATE TABLE IF NOT EXISTS station_managers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  station_id TEXT NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+  verified_id TEXT NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, station_id)
+);
+
+-- Enable RLS
+ALTER TABLE station_managers ENABLE ROW LEVEL SECURITY;
+
+-- Policies for station_managers
+CREATE POLICY "managers_own_read" ON station_managers FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "managers_service_all" ON station_managers FOR ALL USING (auth.role() = 'service_role');
+
+
+-- 6. STATION SLOTS
+-- Allows managers to block specific time slots or manage capacity
+CREATE TABLE IF NOT EXISTS station_slots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  station_id TEXT NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+  slot_date DATE NOT NULL,
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  status TEXT NOT NULL DEFAULT 'available', -- 'available' or 'blocked'
+  reason TEXT, -- Optional: Reason for blocking (e.g., 'Maintenance')
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(station_id, slot_date, start_time)
+);
+
+-- Enable RLS
+ALTER TABLE station_slots ENABLE ROW LEVEL SECURITY;
+
+-- Policies for station_slots
+CREATE POLICY "slots_public_read" ON station_slots FOR SELECT USING (true);
+CREATE POLICY "slots_manager_all" ON station_slots FOR ALL USING (
+  EXISTS (
+    SELECT 1 FROM station_managers 
+    WHERE station_managers.user_id = auth.uid() 
+    AND station_managers.station_id = station_slots.station_id
+  )
+);
+CREATE POLICY "slots_service_all" ON station_slots FOR ALL USING (auth.role() = 'service_role');
+
+
+-- Update Bookings Policy to allow managers to see bookings for their station
+CREATE POLICY "bookings_manager_read" ON bookings FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM station_managers 
+    WHERE station_managers.user_id = auth.uid() 
+    AND station_managers.station_id = bookings.station_id
+  )
+);
