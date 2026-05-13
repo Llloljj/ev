@@ -144,3 +144,61 @@ After all tasks, verify:
 - [ ] All tasks verified
 - [ ] Must-haves confirmed
 </success_criteria>
+
+---
+phase: 2
+plan: 1
+wave: 1
+depends_on: ["1.2"]
+files_modified: ["public/login.html"]
+autonomous: true
+must_haves:
+  truths:
+    - "Login page has options for User, Admin, and Station Manager"
+    - "Admin option redirects to admin.html"
+    - "Station Manager option is a placeholder with no functionality"
+  artifacts:
+    - "public/login.html updated with role selection UI"
+---
+
+# Plan 2.1: Role-Based Login Portal Redesign
+
+<objective>
+Redesign the login page to act as a role-selection portal with three options: User, Admin, and Station Manager.
+Purpose: Allow users to explicitly choose their role. User goes to the main app (or signs in), Admin goes to the admin panel, and Station Manager acts as a visual placeholder for future implementation.
+Output: Updated login.html with three distinct role options.
+</objective>
+
+<context>
+Load for context:
+- public/login.html
+</context>
+
+<tasks>
+
+<task type="auto">
+  <name>Redesign login.html</name>
+  <files>public/login.html</files>
+  <action>
+    Replace the current login screen with a role-selection UI featuring three cards/buttons:
+    1. User: Follows the existing Google Sign-In flow (or enters the app).
+    2. Admin: Triggers the admin login or redirects to `admin.html` (which handles its own auth check).
+    3. Station Manager: A placeholder image/card with no active functionality right now.
+  </action>
+  <verify>Review code in login.html</verify>
+  <done>Login page redesigned with three role options.</done>
+</task>
+
+</tasks>
+
+<verification>
+After all tasks, verify:
+- [x] login.html presents User, Admin, and Station Manager options
+- [x] Admin option logic is implemented correctly
+- [x] Station Manager option is a non-functional placeholder
+</verification>
+
+<success_criteria>
+- [x] All tasks verified
+- [x] Must-haves confirmed
+</success_criteria>
