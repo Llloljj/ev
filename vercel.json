@@ -6,19 +6,18 @@
       "use": "@vercel/node"
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/(.*)",
-      "dest": "server.js"
+      "source": "/api/(.*)",
+      "destination": "server.js"
     },
     {
-      "src": "/(.*)",
-      "dest": "/public/$1",
-      "continue": true
+      "source": "/",
+      "destination": "/public/index.html"
     },
     {
-      "src": "/",
-      "dest": "/public/index.html"
+      "source": "/(.*)",
+      "destination": "/public/$1"
     }
   ]
 }
