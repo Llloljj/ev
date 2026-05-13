@@ -505,3 +505,5 @@ app.listen(PORT, () => {
   console.log(`📊 Admin panel at http://localhost:${PORT}/admin.html`);
   console.log(`🗄  Database: Supabase (${SUPABASE_URL})\n`);
 });
+
+module.exports = app;
