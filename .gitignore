@@ -4,6 +4,6 @@ evcharging.db
 *.log
 
 # ── Secrets — NEVER commit these ──
-# .env
+.env
 .env.local
 .env.production
