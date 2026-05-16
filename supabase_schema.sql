@@ -178,8 +178,161 @@ CREATE POLICY "slots_service_all" ON station_slots FOR ALL USING (auth.role() = 
 -- Update Bookings Policy to allow managers to see bookings for their station
 CREATE POLICY "bookings_manager_read" ON bookings FOR SELECT USING (
   EXISTS (
-    SELECT 1 FROM station_managers 
-    WHERE station_managers.user_id = auth.uid() 
+    SELECT 1 FROM station_managers
+    WHERE station_managers.user_id = auth.uid()
     AND station_managers.station_id = bookings.station_id
   )
 );
+
+
+-- ═══════════════════════════════════════════════════════
+-- PHASE 3: Community & Rewards (Gamification)
+-- ═══════════════════════════════════════════════════════
+
+-- 7. USER_PROFILES (Extended gamification data)
+CREATE TABLE IF NOT EXISTS user_profiles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE,
+  username TEXT,
+  car_model TEXT,
+  avatar_url TEXT,
+  green_points INTEGER NOT NULL DEFAULT 0,
+  co2_saved_kg DOUBLE PRECISION NOT NULL DEFAULT 0, -- Track CO2 saved in kg
+  total_charging_sessions INTEGER NOT NULL DEFAULT 0,
+  total_kwh_consumed DOUBLE PRECISION NOT NULL DEFAULT 0,
+  member_since TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_active TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  level TEXT NOT NULL DEFAULT 'Novice', -- 'Novice', 'Eco Warrior', 'Green Champion', 'Climate Hero'
+  streak_days INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Enable RLS
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+
+-- Policies for user_profiles
+CREATE POLICY "user_profiles_own_read" ON user_profiles FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "user_profiles_own_update" ON user_profiles FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "user_profiles_service_all" ON user_profiles FOR ALL USING (auth.role() = 'service_role');
+
+-- Auto-create user_profile on signup
+CREATE OR REPLACE FUNCTION handle_new_user_profile()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO user_profiles (user_id, username, member_since)
+  VALUES (NEW.id, NEW.raw_user_meta_data->>'full_name', NOW());
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created_profile ON auth.users;
+CREATE TRIGGER on_auth_user_created_profile
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION handle_new_user_profile();
+
+
+-- 8. ACHIEVEMENTS (Badge system)
+CREATE TABLE IF NOT EXISTS achievements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  achievement_type TEXT NOT NULL, -- 'first_charge', 'eco_streak_7', 'co2_saver_10kg', 'green_champion', 'level_up', 'early_adopter'
+  title TEXT NOT NULL,
+  description TEXT,
+  points_earned INTEGER NOT NULL DEFAULT 0,
+  awarded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, achievement_type)
+);
+
+-- Enable RLS
+ALTER TABLE achievements ENABLE ROW LEVEL SECURITY;
+
+-- Policies for achievements
+CREATE POLICY "achievements_own_read" ON achievements FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "achievements_service_all" ON achievements FOR ALL USING (auth.role() = 'service_role');
+
+
+-- 9. LEADERBOARD VIEW (For CO2 savings rankings)
+CREATE OR REPLACE VIEW leaderboard AS
+SELECT
+  up.user_id,
+  up.username,
+  up.avatar_url,
+  up.car_model,
+  up.green_points,
+  up.co2_saved_kg,
+  up.level,
+  up.streak_days,
+  up.total_charging_sessions,
+  ROW_NUMBER() OVER (ORDER BY up.co2_saved_kg DESC, up.green_points DESC) as rank
+FROM user_profiles up
+ORDER BY up.co2_saved_kg DESC, up.green_points DESC;
+
+
+-- 10. FUNCTION: Award achievement & points
+CREATE OR REPLACE FUNCTION award_achievement(
+  p_user_id UUID,
+  p_type TEXT,
+  p_title TEXT,
+  p_description TEXT DEFAULT NULL,
+  p_points INTEGER DEFAULT 0
+)
+RETURNS VOID AS $$
+DECLARE
+  v_exists BOOLEAN;
+BEGIN
+  -- Check if achievement already exists
+  SELECT EXISTS (
+    SELECT 1 FROM achievements
+    WHERE user_id = p_user_id AND achievement_type = p_type
+  ) INTO v_exists;
+
+  IF NOT v_exists THEN
+    -- Insert achievement
+    INSERT INTO achievements (user_id, achievement_type, title, description, points_earned)
+    VALUES (p_user_id, p_type, p_title, p_description, p_points)
+    ON CONFLICT (user_id, achievement_type) DO NOTHING;
+
+    -- Update user's green_points
+    UPDATE user_profiles
+    SET green_points = green_points + p_points,
+        updated_at = NOW()
+    WHERE user_id = p_user_id;
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- 11. FUNCTION: Update CO2 saved (called after each booking)
+CREATE OR REPLACE FUNCTION update_co2_savings(
+  p_user_id UUID,
+  p_kwh_consumed DOUBLE PRECISION
+)
+RETURNS VOID AS $$
+DECLARE
+  v_co2_per_kwh DOUBLE PRECISION := 0.42; -- Approx 0.42 kg CO2 per kWh (vs gasoline)
+  v_co2_saved DOUBLE PRECISION;
+BEGIN
+  -- Calculate CO2 saved compared to gasoline (approx 0.12 kWh/km for EV vs 0.08L gasoline/km)
+  -- Simplified: each kWh saves ~0.42 kg CO2 vs fossil fuel
+  v_co2_saved := p_kwh_consumed * v_co2_per_kwh;
+
+  UPDATE user_profiles
+  SET co2_saved_kg = co2_saved_kg + v_co2_saved,
+      total_kwh_consumed = total_kwh_consumed + p_kwh_consumed,
+      total_charging_sessions = total_charging_sessions + 1,
+      last_active = NOW(),
+      updated_at = NOW()
+  WHERE user_id = p_user_id;
+
+  -- Check for achievement triggers
+  -- First charge achievement
+  PERFORM award_achievement(p_user_id, 'first_charge', 'First Charge', 'Completed your first charging session', 10);
+
+  -- Eco streak - 7 days
+  -- Note: streak logic would need to be tracked separately
+
+  -- CO2 Saver milestones (check after update)
+  -- This will be handled in the application logic or via triggers
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

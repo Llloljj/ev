@@ -156,21 +156,48 @@ app.get('/api/health', async (req, res) => {
 
 // ─── Station Routes ────────────────────────────────────────────────────────────
 
-// GET /api/stations?lat=&lng=&radius=&charger_type=&fast_only=&available_only=
+// GET /api/stations?lat=&lng=&radius=&charger_type=&fast_only=&available_only=&search=
 app.get('/api/stations', async (req, res) => {
-  const { lat, lng, radius = 50, charger_type, fast_only, available_only } = req.query;
+  const { lat, lng, radius = 50, charger_type, fast_only, available_only, search } = req.query;
 
-  const { data: stations, error } = await supabase.from('stations').select('*');
+  let query = supabase.from('stations').select('*');
+
+  // Backend search using ilike for partial name/address matches
+  if (search) {
+    const searchTerm = `%${search}%`;
+    query = query.or(`name.ilike.${searchTerm},address.ilike.${searchTerm},operator.ilike.${searchTerm}`);
+  }
+
+  const { data: stations, error } = await query;
   if (error) return res.status(500).json({ success: false, message: error.message });
 
-  let result = stations.map(s => ({
-    ...s,
-    distance: lat && lng ? haversine(parseFloat(lat), parseFloat(lng), s.latitude, s.longitude) : null
-  }));
+  // Remove duplicates based on ID (to handle potential DB redundancy)
+  const uniqueStations = Array.from(new Map(stations.map(s => [s.id, s])).values());
+
+  let result = uniqueStations.map(s => {
+    // Try to extract city from address if not present
+    const addrParts = s.address ? s.address.split(',').map(p => p.trim()) : [];
+    const city = addrParts.length >= 2 ? addrParts[addrParts.length - 2] : (addrParts[0] || 'Unknown');
+    
+    return {
+      ...s,
+      city: s.city || city,
+      distance: lat && lng ? haversine(parseFloat(lat), parseFloat(lng), s.latitude, s.longitude) : null
+    };
+  });
 
   if (lat && lng) {
-    result = result.filter(s => s.distance <= parseFloat(radius));
-    result.sort((a, b) => a.distance - b.distance);
+    const r = parseFloat(radius);
+    const nearby = result.filter(s => s.distance <= r);
+    
+    // Fallback: If no stations in radius, return the closest 10 nationwide
+    if (nearby.length === 0 && !search && !charger_type && !fast_only && !available_only) {
+      result.sort((a, b) => a.distance - b.distance);
+      result = result.slice(0, 10);
+    } else {
+      result = nearby;
+      result.sort((a, b) => a.distance - b.distance);
+    }
   }
 
   if (charger_type)           result = result.filter(s => s.charger_types.includes(charger_type));
@@ -187,6 +214,55 @@ app.get('/api/stations/:id', async (req, res) => {
   if (error || !station) return res.status(404).json({ success: false, message: 'Station not found' });
   res.json({ success: true, station });
 });
+
+// ─── Favorites Routes ──────────────────────────────────────────────────────
+
+// GET /api/favorites — retrieve user's favorite station IDs
+app.get('/api/favorites', requireAuth, async (req, res) => {
+  const { data: favs, error } = await supabase
+    .from('user_favorites')
+    .select('station_id')
+    .eq('user_id', req.user.id);
+
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  const stationIds = (favs || []).map(f => f.station_id);
+  res.json({ success: true, favorites: stationIds });
+});
+
+// POST /api/favorites — save user's favorite station IDs (replace all)
+app.post('/api/favorites', requireAuth, async (req, res) => {
+  const { station_ids } = req.body;
+  if (!Array.isArray(station_ids)) {
+    return res.status(400).json({ success: false, message: 'station_ids must be an array' });
+  }
+
+  // Delete existing favorites for user, then insert new set
+  await supabase.from('user_favorites').delete().eq('user_id', req.user.id);
+
+  if (station_ids.length > 0) {
+    const inserts = station_ids.map(station_id => ({
+      user_id: req.user.id,
+      station_id
+    }));
+    const { error: insErr } = await supabase.from('user_favorites').insert(inserts);
+    if (insErr) return res.status(500).json({ success: false, message: insErr.message });
+  }
+
+  res.json({ success: true, favorites: station_ids });
+});
+
+// DELETE /api/favorites/:stationId — remove single favorite
+app.delete('/api/favorites/:stationId', requireAuth, async (req, res) => {
+  const { error } = await supabase
+    .from('user_favorites')
+    .delete()
+    .eq('user_id', req.user.id)
+    .eq('station_id', req.params.stationId);
+
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true });
+});
+
 
 // GET /api/stations/:id/slots?date=
 app.get('/api/stations/:id/slots', async (req, res) => {
@@ -311,11 +387,14 @@ app.post('/api/manager/slots/toggle', requireAuth, async (req, res) => {
 // ─── Booking Routes ────────────────────────────────────────────────────────────
 
 // POST /api/bookings
-app.post('/api/bookings', async (req, res) => {
-  const { user_id, station_id, slot_time, duration_hours = 1,
+app.post('/api/bookings', requireAuth, async (req, res) => {
+  const { station_id, slot_time, duration_hours = 1,
           charger_type, tx_hash, wallet_address, payment_method = 'simulated' } = req.body;
 
-  if (!user_id || !station_id || !slot_time || !charger_type)
+  // Use authenticated user's ID - prevent IDOR by ignoring user_id from body
+  const user_id = req.user.id;
+
+  if (!station_id || !slot_time || !charger_type)
     return res.status(400).json({ success: false, message: 'Missing required fields' });
 
   const { data: station } = await supabase.from('stations').select('*').eq('id', station_id).single();
@@ -351,18 +430,36 @@ app.post('/api/bookings', async (req, res) => {
     .update({ available_slots: Math.max(0, station.available_slots - 1) })
     .eq('id', station_id);
 
+  // Update CO2 savings and check for achievements after confirmed booking
+  const kwh_consumed = 7.4 * parseFloat(duration_hours);
+  await supabase.rpc('update_co2_savings', { p_user_id: user_id, p_kwh_consumed: kwh_consumed });
+
+  // Check if first booking - award first charge achievement
+  const { count: userBookingCount } = await supabase
+    .from('bookings')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user_id);
+  if (userBookingCount === 1) {
+    await supabase.rpc('award_achievement', {
+      p_user_id: user_id,
+      p_type: 'first_charge',
+      p_title: 'First Charge',
+      p_description: 'Completed your first charging session',
+      p_points: 10
+    });
+  }
+
   res.json({ success: true, message: 'Booking confirmed!', booking });
 });
 
-// GET /api/bookings?user_id=
-app.get('/api/bookings', async (req, res) => {
-  const { user_id } = req.query;
+// GET /api/bookings — returns bookings for authenticated user only
+app.get('/api/bookings', requireAuth, async (req, res) => {
+  // Only return the authenticated user's bookings - prevent IDOR
   let query = supabase
     .from('bookings')
     .select('*, stations(name, address, latitude, longitude)')
+    .eq('user_id', req.user.id)
     .order('created_at', { ascending: false });
-
-  if (user_id) query = query.eq('user_id', user_id);
 
   const { data: bookings, error } = await query;
   if (error) return res.status(500).json({ success: false, message: error.message });
@@ -380,10 +477,15 @@ app.get('/api/bookings', async (req, res) => {
 });
 
 // PATCH /api/bookings/:id/cancel
-app.patch('/api/bookings/:id/cancel', async (req, res) => {
+app.patch('/api/bookings/:id/cancel', requireAuth, async (req, res) => {
   const { data: booking } = await supabase.from('bookings').select('*').eq('id', req.params.id).single();
   if (!booking)                    return res.status(404).json({ success: false, message: 'Booking not found' });
   if (booking.status === 'cancelled') return res.status(400).json({ success: false, message: 'Already cancelled' });
+
+  // IDOR protection: ensure user owns this booking
+  if (booking.user_id !== req.user.id) {
+    return res.status(403).json({ success: false, message: 'Not authorized to cancel this booking' });
+  }
 
   await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', req.params.id);
 
@@ -397,10 +499,117 @@ app.patch('/api/bookings/:id/cancel', async (req, res) => {
   res.json({ success: true, message: 'Booking cancelled successfully' });
 });
 
+// ─── Leaderboard Route ─────────────────────────────────────────────────────────
+
+// GET /api/leaderboard — returns top 10 users from leaderboard view
+app.get('/api/leaderboard', async (req, res) => {
+  const { data: leaderboard, error } = await supabase
+    .from('leaderboard')
+    .select('*')
+    .order('rank', { ascending: true })
+    .limit(10);
+
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true, leaderboard });
+});
+
+// ─── User Profile Route ─────────────────────────────────────────────────────────
+
+// GET /api/profile — returns authenticated user profile and achievements
+app.get('/api/profile', requireAuth, async (req, res) => {
+  // Fetch user profile data
+  const { data: profile, error: profileError } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('user_id', req.user.id)
+    .single();
+
+  if (profileError && profileError.code !== 'PGRST116') {
+    return res.status(500).json({ success: false, message: profileError.message });
+  }
+
+  // Fetch user's achievements
+  const { data: achievements, error: achError } = await supabase
+    .from('achievements')
+    .select('*')
+    .eq('user_id', req.user.id)
+    .order('awarded_at', { ascending: false });
+
+  if (achError) return res.status(500).json({ success: false, message: achError.message });
+
+  // Calculate rank from leaderboard
+  const { data: rankData } = await supabase
+    .from('leaderboard')
+    .select('rank')
+    .eq('user_id', req.user.id)
+    .single();
+
+  res.json({
+    success: true,
+    profile: profile || null,
+    achievements: achievements || [],
+    rank: rankData?.rank || null
+  });
+});
+
+// ─── User Insights Route ─────────────────────────────────────────────────────────
+
+// GET /api/user/insights — aggregated charging stats for the dashboard
+app.get('/api/user/insights', requireAuth, async (req, res) => {
+  // Fetch all confirmed bookings for this user
+  const { data: bookings, error } = await supabase
+    .from('bookings')
+    .select('*, stations(price_per_kwh)')
+    .eq('user_id', req.user.id)
+    .eq('status', 'confirmed')
+    .order('slot_time', { ascending: true });
+
+  if (error) return res.status(500).json({ success: false, message: error.message });
+
+  // Calculate aggregates
+  let totalSpent = 0;
+  let totalKwh = 0;
+  const monthlyData = {};
+
+  for (const booking of (bookings || [])) {
+    const amount = booking.amount || 0;
+    totalSpent += amount;
+
+    // Estimate kWh from amount and station price
+    const pricePerKwh = booking.stations?.price_per_kwh || 14; // default fallback
+    const kwh = pricePerKwh > 0 ? amount / pricePerKwh : 0;
+    totalKwh += kwh;
+
+    // Group by month
+    const date = new Date(booking.slot_time);
+    const monthKey = date.toLocaleString('en-US', { month: 'short', year: '2-digit' }); // e.g., "May 26"
+    if (!monthlyData[monthKey]) {
+      monthlyData[monthKey] = { month: monthKey, kwh: 0 };
+    }
+    monthlyData[monthKey].kwh += kwh;
+  }
+
+  // CO2 savings: ~0.21 kg CO2 avoided per kWh vs petrol (~2.5 kg/L, 15 km/L = ~0.167 kg/km, EV uses ~0.15 kWh/km)
+  const totalCo2 = totalKwh * 0.21;
+
+  // Format history as array (last 6 months or available)
+  const history = Object.values(monthlyData).slice(-6);
+
+  res.json({
+    success: true,
+    data: {
+      total_kwh: Math.round(totalKwh * 10) / 10,
+      total_spent: Math.round(totalSpent),
+      total_co2: Math.round(totalCo2 * 10) / 10,
+      history
+    }
+  });
+});
+
 // ─── Razorpay Routes ───────────────────────────────────────────────────────────
 
 // POST /api/payment/create-order
-app.post('/api/payment/create-order', async (req, res) => {
+app.post('/api/payment/create-order', requireAuth, async (req, res) => {
   const { amount, station_id, slot_time, charger_type, duration_hours } = req.body;
   if (!amount || !station_id || !slot_time || !charger_type)
     return res.status(400).json({ success: false, message: 'Missing fields' });
@@ -423,9 +632,12 @@ app.post('/api/payment/create-order', async (req, res) => {
 });
 
 // POST /api/payment/verify
-app.post('/api/payment/verify', async (req, res) => {
+app.post('/api/payment/verify', requireAuth, async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature,
-          user_id, station_id, slot_time, charger_type, duration_hours } = req.body;
+          station_id, slot_time, charger_type, duration_hours } = req.body;
+
+  // Use authenticated user's ID - prevent IDOR by ignoring user_id from body
+  const user_id = req.user.id;
 
   if (razorpay) {
     const body     = razorpay_order_id + '|' + razorpay_payment_id;
@@ -458,12 +670,73 @@ app.post('/api/payment/verify', async (req, res) => {
     .update({ available_slots: Math.max(0, station.available_slots - 1) })
     .eq('id', station_id);
 
+  // Update CO2 savings and check for achievements after confirmed booking
+  const kwh_consumed = 7.4 * parseFloat(duration_hours || 1);
+  await supabase.rpc('update_co2_savings', { p_user_id: user_id, p_kwh_consumed: kwh_consumed });
+
+  // Check if first booking - award first charge achievement
+  const { count: userBookingCount } = await supabase
+    .from('bookings')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user_id);
+  if (userBookingCount === 1) {
+    await supabase.rpc('award_achievement', {
+      p_user_id: user_id,
+      p_type: 'first_charge',
+      p_title: 'First Charge',
+      p_description: 'Completed your first charging session',
+      p_points: 10
+    });
+  }
+
   console.log(`✅ Razorpay payment verified: ${razorpay_payment_id}`);
   res.json({ success: true, booking });
 });
 
+// ─── Phase 3: Community & Rewards ─────────────────────────────────────────────
+
+// GET /api/leaderboard
+app.get('/api/leaderboard', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('leaderboard')
+      .select('*')
+      .limit(10);
+    
+    if (error) throw error;
+    res.json({ success: true, leaderboard: data });
+  } catch (e) {
+    console.error('Leaderboard fetch error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// GET /api/profile
+app.get('/api/profile', requireAuth, async (req, res) => {
+  try {
+    const user_id = req.user.id;
+    const { data: profile, error: pErr } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('user_id', user_id)
+      .single();
+    
+    if (pErr) throw pErr;
+
+    const { data: achievements } = await supabase
+      .from('achievements')
+      .select('*')
+      .eq('user_id', user_id);
+
+    res.json({ success: true, profile, achievements });
+  } catch (e) {
+    console.error('Profile fetch error:', e);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // ─── Stats Route ───────────────────────────────────────────────────────────────
-app.get('/api/stats', async (req, res) => {
+app.get('/api/stats', requireAuth, async (req, res) => {
   const { count: totalStations } = await supabase.from('stations').select('*', { count: 'exact', head: true });
   const { data: slotData }       = await supabase.from('stations').select('total_slots, available_slots');
   const totalSlots     = (slotData || []).reduce((s, r) => s + r.total_slots, 0);

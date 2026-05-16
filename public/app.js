@@ -18,14 +18,48 @@ let heatmapLayers = [], heatmapOn = false;
 let pendingBookingData = null;
 
 // ── Favourites & Sort ──────────────────────────────────────────
-let favorites = new Set(JSON.parse(localStorage.getItem('evpath_favs') || '[]'));
+let favorites = new Set();
 let currentSort = 'default';
+
+// Load favorites from backend on init
+async function loadFavoritesFromBackend() {
+  const token = localStorage.getItem('ev_session_token');
+  if (!token) return;
+  try {
+    const res = await fetch(`${API}/favorites`, {
+      headers: { 'x-session-token': token }
+    });
+    const data = await res.json();
+    if (data.success && data.favorites) {
+      favorites = new Set(data.favorites);
+      localStorage.setItem('evpath_favs', JSON.stringify([...favorites]));
+    }
+  } catch (e) {
+    // Fall back to localStorage
+    favorites = new Set(JSON.parse(localStorage.getItem('evpath_favs') || '[]'));
+  }
+}
+
+// Sync favorites to backend (non-blocking)
+async function syncFavoritesToBackend() {
+  const token = localStorage.getItem('ev_session_token');
+  if (!token) return;
+  try {
+    await fetch(`${API}/favorites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+      body: JSON.stringify({ station_ids: [...favorites] })
+    });
+  } catch (e) {
+    // Silent fail - localStorage already has the data
+  }
+}
 
 // ── Theme ──────────────────────────────────────────────────────
 let isDark = localStorage.getItem('evpath_theme') !== 'light';
 
 // ── Init (Supabase Auth Check) ──
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   const sessionUser = JSON.parse(localStorage.getItem('ev_user'));
   if (!sessionUser) {
     window.location.href = '/login.html';
@@ -34,6 +68,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
   DEMO_USER = sessionUser.id;
   DEMO_USER_NAME = sessionUser.user_metadata?.full_name || sessionUser.email.split('@')[0];
+
+  // Load favorites from backend (non-blocking)
+  loadFavoritesFromBackend(); // fire and forget
 
   // Default vehicle profile if none saved
   if (!vehicleProfile) {
@@ -75,6 +112,7 @@ window.addEventListener('DOMContentLoaded', () => {
   updateNavUser();
   loadHeroStats();
   initTheme();
+  initLiveTicker();
   
   // Load all stations across India by default at start
   loadStations(null, null);
@@ -119,7 +157,7 @@ function getUserLocation() {
 }
 
 // ── Stations ───────────────────────────────────────────────────
-async function loadStations(lat, lng) {
+async function loadStations(lat, lng, searchQuery) {
   const charger = document.getElementById('filter-charger').value;
   const radius = document.getElementById('filter-radius').value;
   const fast = document.getElementById('filter-fast').checked;
@@ -130,6 +168,7 @@ async function loadStations(lat, lng) {
   if (charger) url += `&charger_type=${charger}`;
   if (fast) url += `&fast_only=true`;
   if (avail) url += `&available_only=true`;
+  if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
 
   try {
     const res = await fetch(url);
@@ -196,13 +235,15 @@ function stationCardHTML(s) {
   const barWidth = Math.round(pct * 100);
   const isFav = favorites.has(s.id);
 
-  let dimStyle = '';
+  let isOutOfRange = false;
   if (vehicleProfile && s.distance != null) {
     const remaining = (vehicleProfile.batteryPct / 100) * vehicleProfile.rangeKm;
-    if (s.distance > remaining) dimStyle = 'opacity:.35;filter:grayscale(.6)';
+    if (s.distance > remaining) isOutOfRange = true;
   }
+  const rangeBadge = isOutOfRange ? `<span class="sc-tag" style="background:rgba(239,68,68,.1);color:var(--danger);border:1px solid rgba(239,68,68,.2)">Out of Range</span>` : '';
+  const cardStyle = isOutOfRange ? 'opacity:.45;filter:grayscale(.8)' : '';
 
-  return `<div class="station-card" onclick="openStationDetail('${s.id}')" id="sc-${s.id}" style="${dimStyle}">
+  return `<div class="station-card ${isOutOfRange ? 'out-of-range' : ''}" onclick="openStationDetail('${s.id}')" id="sc-${s.id}" style="${cardStyle}">
     <div class="sc-header">
       <div class="sc-name">${s.name}</div>
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
@@ -214,6 +255,7 @@ function stationCardHTML(s) {
     </div>
     <div class="sc-meta">
       ${fast}
+      ${rangeBadge}
       <span class="sc-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>${s.power_kw}kW</span>
       <span class="sc-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${s.avg_wait_minutes}min</span>
       <span class="sc-tag">${ensureArray(s.charger_types).slice(0, 2).join(', ')}</span>
@@ -600,7 +642,7 @@ async function cancelBooking(id) {
     if (!data.success) throw new Error(data.message);
     showToast('Booking cancelled', 'info');
     loadBookings();
-    loadStations();
+    loadStations(userLat, userLng);
   } catch (e) {
     showToast(e.message || 'Cancel failed', 'error');
   }
@@ -610,13 +652,208 @@ async function cancelBooking(id) {
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-  document.getElementById(`page-${name}`).classList.add('active');
+  
+  const page = document.getElementById(`page-${name}`);
+  if (page) page.classList.add('active');
+  
   const nl = document.getElementById(`nav-${name}`);
   if (nl) nl.classList.add('active');
+  
   if (name === 'bookings') loadBookings();
+  if (name === 'dashboard') initDashboard();
+  if (name === 'leaderboard') loadLeaderboard();
+  if (name === 'profile') loadUserProfile();
   if (name === 'map' && map) setTimeout(() => map.invalidateSize(), 100);
+  
   // Close station detail panel when navigating away from map
   if (name !== 'map') closeStationDetail();
+  
+  // Hide hero if navigating to any page
+  document.getElementById('hero-section').style.display = 'none';
+}
+
+/** ── Dashboard Logic ── **/
+let energyChart = null;
+
+async function initDashboard() {
+  // Show loading skeleton if needed
+  const kpis = ['energy', 'savings', 'co2'];
+  kpis.forEach(id => document.getElementById(`kpi-${id}`).innerText = '...');
+  
+  try {
+    // 1. Fetch data from Claude's new endpoint (with local mock fallback)
+    let data;
+    try {
+      const res = await fetch(`${API}/user/insights`, {
+        headers: { 'x-session-token': localStorage.getItem('evpath_session') }
+      });
+      const json = await res.json();
+      data = json.success ? json.data : getMockInsights();
+    } catch(e) {
+      data = getMockInsights();
+    }
+
+    // 2. Animate KPI numbers
+    animateValue('kpi-energy', 0, data.total_kwh, 1500, ' kWh');
+    animateValue('kpi-savings', 0, data.total_spent, 1500, '₹', true);
+    animateValue('kpi-co2', 0, data.total_co2, 1500, ' kg');
+
+    // 3. Render Chart
+    initEnergyCharts(data.history);
+
+  } catch (err) {
+    console.error('Dashboard init failed:', err);
+  }
+}
+
+function animateValue(id, start, end, duration, suffix = '', prefix = false) {
+  const obj = document.getElementById(id);
+  let startTimestamp = null;
+  const step = (timestamp) => {
+    if (!startTimestamp) startTimestamp = timestamp;
+    const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+    const val = (progress * (end - start) + start).toFixed(id === 'kpi-savings' ? 0 : 1);
+    obj.innerHTML = prefix ? suffix + val : val + suffix;
+    if (progress < 1) {
+      window.requestAnimationFrame(step);
+    }
+  };
+  window.requestAnimationFrame(step);
+}
+
+function initEnergyCharts(history) {
+  const options = {
+    series: [{
+      name: 'Energy Consumed',
+      data: history.map(h => h.kwh)
+    }],
+    chart: {
+      type: 'area',
+      height: 350,
+      toolbar: { show: false },
+      background: 'transparent',
+      foreColor: '#94a3b8'
+    },
+    colors: ['#3B82F6'],
+    dataLabels: { enabled: false },
+    stroke: { curve: 'smooth', width: 3 },
+    fill: {
+      type: 'gradient',
+      gradient: {
+        shadeIntensity: 1,
+        opacityFrom: 0.45,
+        opacityTo: 0.05,
+        stops: [20, 100]
+      }
+    },
+    grid: { borderColor: 'rgba(255,255,255,0.05)', strokeDashArray: 4 },
+    xaxis: {
+      categories: history.map(h => h.month),
+      axisBorder: { show: false },
+    }
+  };
+
+  if (energyChart) energyChart.destroy();
+  energyChart = new ApexCharts(document.querySelector("#energy-chart"), options);
+  energyChart.render();
+}
+
+/** ── Leaderboard Logic ── **/
+async function loadLeaderboard() {
+  const list = document.getElementById('leaderboard-list');
+  try {
+    const res = await fetch(`${API}/leaderboard`, {
+      headers: { 'x-session-token': localStorage.getItem('evpath_session') }
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+
+    list.innerHTML = data.leaderboard.map((user, idx) => `
+      <div class="leaderboard-row">
+        <div class="rank-number">${idx + 1}</div>
+        <div class="leaderboard-user">
+          <img src="${user.avatar_url || 'https://ui-avatars.com/api/?name='+user.username}" class="leaderboard-avatar">
+          <div class="leaderboard-name">${user.username}</div>
+        </div>
+        <div class="leaderboard-points">
+          <span class="lb-val">${user.co2_saved_kg.toFixed(1)}</span>
+          <span class="lb-lbl">kg CO2</span>
+        </div>
+      </div>
+    `).join('');
+  } catch (err) {
+    list.innerHTML = '<div class="error-text">Failed to load leaderboard.</div>';
+  }
+}
+
+/** ── Profile Logic ── **/
+async function loadUserProfile() {
+  try {
+    const res = await fetch(`${API}/profile`, {
+      headers: { 'x-session-token': localStorage.getItem('evpath_session') }
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+
+    const profile = data.profile;
+    document.getElementById('profile-name').innerText = profile.username;
+    document.getElementById('profile-car').innerText = profile.car_model || 'EV Enthusiast';
+    document.getElementById('profile-avatar').src = profile.avatar_url || `https://ui-avatars.com/api/?name=${profile.username}&background=00ff88&color=0a0a0a`;
+    document.getElementById('profile-level').innerText = `Lv. ${profile.level || 1}`;
+    
+    animateValue('stat-points', 0, profile.green_points, 1000);
+    animateValue('stat-co2', 0, profile.co2_saved_kg, 1000);
+
+    renderAchievements(data.achievements);
+  } catch (err) {
+    console.error('Profile load error:', err);
+  }
+}
+
+function renderAchievements(achievements) {
+  const container = document.getElementById('profile-achievements');
+  const allBadges = [
+    { type: 'FIRST_CHARGE', title: 'Pioneer', icon: '⚡' },
+    { type: 'CO2_WARRIOR', title: 'Eco Hero', icon: '🌿' },
+    { type: 'NIGHT_OWL', title: 'Night Owl', icon: '🌙' },
+    { type: 'STREAK_7', title: 'Consistency', icon: '🔥' }
+  ];
+
+  container.innerHTML = allBadges.map(badge => {
+    const isUnlocked = achievements.some(a => a.achievement_type === badge.type);
+    return `
+      <div class="achievement-item ${isUnlocked ? 'unlocked' : 'locked'}" title="${isUnlocked ? 'Unlocked!' : 'Locked'}">
+        <div class="badge-icon">${badge.icon}</div>
+        <span>${badge.title}</span>
+      </div>
+    `;
+  }).join('');
+}
+      axisTicks: { show: false }
+    },
+    yaxis: { labels: { formatter: (v) => v + ' kWh' } },
+    tooltip: { theme: 'dark' }
+  };
+
+  if (energyChart) energyChart.destroy();
+  energyChart = new ApexCharts(document.querySelector("#energy-chart"), options);
+  energyChart.render();
+}
+
+function getMockInsights() {
+  return {
+    total_kwh: 482.4,
+    total_spent: 8450,
+    total_co2: 124.5,
+    history: [
+      { month: 'Dec', kwh: 65 },
+      { month: 'Jan', kwh: 82 },
+      { month: 'Feb', kwh: 74 },
+      { month: 'Mar', kwh: 91 },
+      { month: 'Apr', kwh: 85 },
+      { month: 'May', kwh: 85.4 }
+    ]
+  };
 }
 
 function toggleMobileMenu() {
@@ -687,6 +924,11 @@ function applyVehicleProfileUI() {
   document.getElementById('vehicle-strip-pct').style.color = color;
   // Pulse strip if low battery
   if (pct <= 20) strip.classList.add('low-battery'); else strip.classList.remove('low-battery');
+  
+  // Re-render station list to update range-based dimming
+  if (allStations && allStations.length > 0) {
+    renderStationList(allStations);
+  }
 }
 
 function closeVehicleProfileModal() {
@@ -796,6 +1038,51 @@ function showAIInsight() {
   banner.className = 'ai-insight-banner';
   banner.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg><span>${msg}</span><button onclick="this.parentElement.remove()">&#10005;</button>`;
   document.getElementById('station-list').insertAdjacentElement('beforebegin', banner);
+}
+
+// ── Live Ticker ────────────────────────────────────────────────
+const TICKER_EVENTS = [
+  "Tata Nexon EV connected @ Bhopal Central",
+  "Ola S1 Pro finished charging @ Indore City",
+  "New 120kW Fast Slot available @ MG Road",
+  "Ather 450X charging @ 18kW in Gwalior",
+  "MG ZS EV charging @ 50kW in Jabalpur",
+  "Station 'EcoCharge' now 100% online",
+  "Peak demand detected in Bengaluru central",
+  "User 'Rahul' just booked @ SpeedCharge",
+  "BYD Atto 3 connected @ Highway 44 Plaza"
+];
+
+function initLiveTicker() {
+  const ticker = document.getElementById('pulse-ticker');
+  if (!ticker) return;
+  
+  let currentIdx = 0;
+  
+  // Create ticker items
+  ticker.innerHTML = TICKER_EVENTS.map(ev => {
+    const parts = ev.split('@');
+    if (parts.length > 1) {
+      return `<div class="ticker-item"><strong>${parts[0].trim()}</strong> <span>@ ${parts[1].trim()}</span></div>`;
+    }
+    return `<div class="ticker-item">${ev}</div>`;
+  }).join('') + `<div class="ticker-item"><strong>Tata Nexon EV</strong> <span>@ Bhopal Central</span></div>`; // loop back item
+
+  setInterval(() => {
+    currentIdx++;
+    ticker.style.transform = `translateY(-${currentIdx * 20}px)`;
+    
+    if (currentIdx >= TICKER_EVENTS.length) {
+      setTimeout(() => {
+        ticker.style.transition = 'none';
+        currentIdx = 0;
+        ticker.style.transform = `translateY(0)`;
+        setTimeout(() => {
+          ticker.style.transition = 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
+        }, 50);
+      }, 500);
+    }
+  }, 3500);
 }
 
 // ── User Profile Modal ──────────────────────────────────────────────
@@ -955,8 +1242,10 @@ function syncThemeIcon() {
 // ── Favourites ─────────────────────────────────────────────────
 function toggleFavorite(id, e) {
   e.stopPropagation();
-  if (favorites.has(id)) favorites.delete(id); else favorites.add(id);
-  localStorage.setItem('evpath_favs', JSON.stringify([...favorites]));
+  const wasFav = favorites.has(id);
+  if (wasFav) favorites.delete(id); else favorites.add(id);
+
+  // Update UI immediately (optimistic)
   const isFav = favorites.has(id);
   const btn = document.querySelector(`#sc-${id} .fav-btn`);
   if (btn) {
@@ -964,6 +1253,13 @@ function toggleFavorite(id, e) {
     btn.querySelector('svg').setAttribute('fill', isFav ? 'currentColor' : 'none');
     btn.title = isFav ? 'Remove favourite' : 'Add favourite';
   }
+
+  // Persist to localStorage immediately
+  localStorage.setItem('evpath_favs', JSON.stringify([...favorites]));
+
+  // Sync to backend (non-blocking)
+  syncFavoritesToBackend();
+
   showToast(isFav ? 'Added to favourites \u2665' : 'Removed from favourites', 'info');
   if (document.getElementById('filter-favs')?.checked) renderStationList(allStations);
 }

@@ -36,7 +36,10 @@
   </div>
   <div class="nav-links">
     <a href="#" class="nav-link active" onclick="showPage('map')" id="nav-map">Find Stations</a>
+    <a href="#" class="nav-link" onclick="showPage('dashboard')" id="nav-dashboard">Energy Insights</a>
     <a href="#" class="nav-link" onclick="showPage('bookings')" id="nav-bookings">My Bookings</a>
+    <a href="#" class="nav-link" onclick="showPage('leaderboard')" id="nav-leaderboard">Leaderboard</a>
+    <a href="#" class="nav-link" onclick="showPage('profile')" id="nav-profile">My Garage</a>
   </div>
   <div class="nav-actions">
     <button id="theme-toggle" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light/dark mode"></button>
@@ -64,6 +67,18 @@
       <div class="hero-stat"><div class="hero-stat-val" id="hstat-slots">0</div><div class="hero-stat-lbl">Total Slots</div></div>
       <div class="hero-stat-div"></div>
       <div class="hero-stat"><div class="hero-stat-val" id="hstat-cities">0</div><div class="hero-stat-lbl">Cities</div></div>
+    </div>
+    
+    <div class="live-pulse-widget">
+      <div class="pulse-indicator">
+        <div class="pulse-dot"></div>
+        <span>Live Pulse</span>
+      </div>
+      <div class="pulse-ticker-wrap">
+        <div class="pulse-ticker" id="pulse-ticker">
+          <div class="ticker-item">Initializing network connection...</div>
+        </div>
+      </div>
     </div>
     <div class="hero-actions">
       <button class="hero-btn-primary" onclick="startWithLocation()" style="width: 100%; max-width: 300px; justify-content: center; font-size: 1.1rem; padding: 16px;">
@@ -218,9 +233,69 @@
     </div>
   </aside>
 
-  <!-- Map Container -->
+  <!-- Dashboard Page ────────────────────────────────────────── -->
+  <div id="page-dashboard" class="page" style="display:none">
+    <div class="dashboard-container">
+      <div class="dashboard-header">
+        <div>
+          <h1 style="font-size: 2rem; font-weight: 800;">Energy Insights</h1>
+          <p style="color: var(--text2); margin-top: 4px;">Track your charging performance and savings.</p>
+        </div>
+        <div class="user-badge" style="background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.2);">
+          <div class="live-glow"></div>
+          <span style="color: var(--success); font-weight: 700;">Live Analysis</span>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+          <div class="kpi-value" id="kpi-energy">0.0</div>
+          <div class="kpi-label">Total Energy (kWh)</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon" style="color:var(--success); background:rgba(16,185,129,0.1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+          <div class="kpi-value" id="kpi-savings">₹0</div>
+          <div class="kpi-label">Money Saved</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon" style="color:var(--accent); background:rgba(249,115,22,0.1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <div class="kpi-value" id="kpi-co2">0.0</div>
+          <div class="kpi-label">CO2 Offset (kg)</div>
+        </div>
+      </div>
+
+      <div class="chart-section">
+        <div class="chart-header">
+          <h3 style="font-weight: 700;">Consumption History</h3>
+          <div style="font-size: 0.8rem; color: var(--text3);">Last 6 Months</div>
+        </div>
+        <div id="energy-chart" style="min-height: 350px;">
+          <!-- Chart will be injected here -->
+          <div class="skel-card" style="height: 300px; width: 100%;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="map-container">
     <div id="map"></div>
+    
+    <!-- Map Legend -->
+    <div class="map-legend">
+      <div class="legend-item">
+        <div class="legend-color available"></div>
+        <span>Available (3+ slots)</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color limited"></div>
+        <span>Limited (1-2 slots)</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color full"></div>
+        <span>Full / Maintenance</span>
+      </div>
+    </div>
+  </div>
 
     <!-- Map Controls Overlay -->
     <div class="map-overlay-controls">
@@ -266,6 +341,65 @@
 
     <div class="bookings-grid" id="bookings-grid">
       <div class="loading-text">Loading your bookings...</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Leaderboard Page ─────────────────────────────────────────────────── -->
+<div id="page-leaderboard" class="page" style="display:none">
+  <div class="dashboard-container">
+    <div class="dashboard-header animate-fade-in">
+      <div>
+        <h1 style="font-size: 2rem; font-weight: 800;"><i class="fas fa-trophy" style="color:#FFD700"></i> CO2 Champions</h1>
+        <p style="color: var(--text2); margin-top: 4px;">Top environmental impact makers in India</p>
+      </div>
+    </div>
+    <div class="glass-card animate-slide-up">
+      <div id="leaderboard-list">
+        <div class="loading-text">Loading champions...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Profile / Garage Page ────────────────────────────────────────────── -->
+<div id="page-profile" class="page" style="display:none">
+  <div class="dashboard-container">
+    <div class="profile-layout">
+      <div class="profile-sidebar glass-card animate-fade-in">
+        <div class="profile-header">
+          <div class="avatar-container">
+            <img id="profile-avatar" src="https://ui-avatars.com/api/?name=User&background=00ff88&color=0a0a0a" alt="Avatar">
+            <div class="level-badge" id="profile-level">Lv. 1</div>
+          </div>
+          <h2 id="profile-name" style="margin-top:15px">Loading...</h2>
+          <p id="profile-car" style="color:var(--text2)">EV Enthusiast</p>
+        </div>
+        <div class="profile-stats-grid" style="margin-top:20px; display:grid; grid-template-columns:1fr 1fr; gap:10px">
+          <div class="p-stat" style="text-align:center; padding:15px; background:rgba(255,255,255,0.03); border-radius:12px">
+            <div style="font-size:1.5rem; font-weight:800; color:var(--primary)" id="stat-points">0</div>
+            <div style="font-size:0.7rem; color:var(--text3); text-transform:uppercase">Points</div>
+          </div>
+          <div class="p-stat" style="text-align:center; padding:15px; background:rgba(255,255,255,0.03); border-radius:12px">
+            <div style="font-size:1.5rem; font-weight:800; color:var(--accent)" id="stat-co2">0</div>
+            <div style="font-size:0.7rem; color:var(--text3); text-transform:uppercase">kg CO2</div>
+          </div>
+        </div>
+      </div>
+      <div class="profile-main" style="flex:1">
+        <div class="glass-card animate-slide-up" style="margin-bottom:20px">
+          <h3 style="margin-bottom:15px"><i class="fas fa-medal" style="color:var(--primary)"></i> Achievements</h3>
+          <div class="achievements-grid" id="profile-achievements" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(80px, 1fr)); gap:15px">
+            <!-- Badges injected here -->
+          </div>
+        </div>
+        <div class="glass-card animate-slide-up" style="animation-delay:0.1s">
+          <h3 style="margin-bottom:15px"><i class="fas fa-car" style="color:var(--secondary)"></i> My Garage</h3>
+          <div id="profile-garage">
+            <div class="empty-garage" style="padding:40px; text-align:center; color:var(--text3)">No vehicles added yet</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

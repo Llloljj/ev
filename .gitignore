@@ -4,6 +4,13 @@ evcharging.db
 *.log
 
 # ── Secrets — NEVER commit these ──
-# .env
+.env
 .env.local
 .env.production
+
+# ── Agent/Local ──
+.claude/
+.gsd/
+scratch/
+bridge.py
+*.webp
